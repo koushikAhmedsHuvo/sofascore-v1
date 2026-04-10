@@ -1,0 +1,69 @@
+version: "3.9"
+
+services:
+  # ─── PostgreSQL ────────────────────────────────────────────────────────────
+  pg:
+    restart: always
+    image: postgres:16-alpine
+    container_name: sofascore-pg
+    volumes:
+      - pgdata_sofascore:/var/lib/postgresql/data/
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-sofascore_db}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── NestJS SofaScore Backend ──────────────────────────────────────────────
+  sofascore-api:
+    restart: always
+    container_name: sofascore-api
+    build:
+      context: .
+      target: production
+    ports:
+      - "${PORT:-3010}:3010"
+    depends_on:
+      pg:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3010
+      POSTGRES_HOST: pg
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-sofascore_db}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_SCHEMA: public
+      PROVIDER_BASE_URL: ${PROVIDER_BASE_URL:-https://sportsdata365.com/football/api/v1/h2h/sports}
+      PROVIDER_API_KEY: ${PROVIDER_API_KEY:-}
+      PROVIDER_AUTH_HEADER_NAME: ${PROVIDER_AUTH_HEADER_NAME:-x-api-key}
+      PROVIDER_TIMEOUT_MS: ${PROVIDER_TIMEOUT_MS:-15000}
+      PROVIDER_RETRY_ATTEMPTS: ${PROVIDER_RETRY_ATTEMPTS:-3}
+      CORS_ORIGINS: ${CORS_ORIGINS:-https://matchstat.com}
+      THROTTLE_TTL_MS: ${THROTTLE_TTL_MS:-60000}
+      THROTTLE_LIMIT: ${THROTTLE_LIMIT:-120}
+      INGESTION_REQUEST_DELAY_MS: ${INGESTION_REQUEST_DELAY_MS:-500}
+      PRIORITY_TOURNAMENT_IDS: ${PRIORITY_TOURNAMENT_IDS:-17,7,8,679,35,37,34,42,130,329}
+      BACKFILL_DAYS_BACK: ${BACKFILL_DAYS_BACK:-365}
+      TTL_LIVE_S: ${TTL_LIVE_S:-30}
+      TTL_SCHEDULED_S: ${TTL_SCHEDULED_S:-300}
+      TTL_RECENT_S: ${TTL_RECENT_S:-3600}
+      TTL_HISTORICAL_S: ${TTL_HISTORICAL_S:-0}
+      TTL_METADATA_S: ${TTL_METADATA_S:-0}
+      TTL_IMMUTABLE_S: ${TTL_IMMUTABLE_S:-0}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3010/api/v1/health/liveness || exit 1"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 3
+
+volumes:
+  pgdata_sofascore: {}
