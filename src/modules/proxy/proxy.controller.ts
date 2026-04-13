@@ -91,7 +91,7 @@ export class ProxyController {
   @ApiResponse({ status: 429, description: 'Throttled — too many requests from this IP.' })
   async proxyGet(
     @Param('sport') sport: string,
-    @Param('path') pathParam: string,
+    @Param('path') pathParam: string | string[],
     @Query() query: Record<string, string>,
     @Req() req: Request & { sofaRawResponse?: boolean },
     @Res() res: Response,
@@ -99,7 +99,10 @@ export class ProxyController {
     // Mark as raw so ResponseTransformInterceptor doesn't wrap the payload.
     req.sofaRawResponse = true;
 
-    const sofaPath = normalizePath(pathParam);
+    const wildcardPath = Array.isArray(pathParam)
+      ? pathParam.join('/')
+      : pathParam;
+    const sofaPath = normalizePath(wildcardPath);
 
     const { payload, source, snapshot } =
       await this.snapshotService.getOrFetch(sofaPath, query, sport);

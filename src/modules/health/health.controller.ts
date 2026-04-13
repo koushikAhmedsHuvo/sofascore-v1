@@ -41,10 +41,14 @@ export class HealthController {
   })
   check(): Promise<HealthCheckResult> {
     const providerUrl = this.sofaContract.getProviderHealthCheckUrl();
+    const providerHeaders = this.sofaContract.buildProviderHeaders();
 
     return this.health.check([
       () => this.db.pingCheck('postgresql'),
-      () => this.http.pingCheck('sportsdata365-provider', providerUrl),
+      () =>
+        this.http.pingCheck('sportsdata365-provider', providerUrl, {
+          headers: providerHeaders,
+        }),
     ]);
   }
 

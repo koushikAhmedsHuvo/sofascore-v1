@@ -17,7 +17,8 @@ import { Request, Response } from 'express';
 interface ErrorResponse {
   statusCode: number;
   message: string | string[];
-  error: string;
+  error: string | Record<string, unknown>;
+  details?: Record<string, unknown>;
   path: string;
   timestamp: string;
 }
@@ -34,7 +35,8 @@ export class AllExceptionsFilter implements ExceptionFilter {
 
     let statusCode = HttpStatus.INTERNAL_SERVER_ERROR;
     let message: string | string[] = 'Internal server error';
-    let error = 'InternalServerError';
+    let error: string | Record<string, unknown> = 'InternalServerError';
+    let details: Record<string, unknown> | undefined;
 
     // Non-Error throws (string, object) fall through to 500 with generic body — rare in Nest.
     if (exception instanceof HttpException) {
@@ -45,7 +47,19 @@ export class AllExceptionsFilter implements ExceptionFilter {
       } else if (typeof res === 'object' && res !== null) {
         const resObj = res as Record<string, unknown>;
         message = (resObj['message'] as string | string[]) ?? message;
-        error = (resObj['error'] as string) ?? error;
+
+        const resError = resObj['error'];
+        if (typeof resError === 'string') {
+          error = resError;
+        } else if (resError && typeof resError === 'object') {
+          error = resError as Record<string, unknown>;
+        }
+
+        const { statusCode: _statusCode, message: _message, error: _error, ...rest } =
+          resObj;
+        if (Object.keys(rest).length > 0) {
+          details = rest;
+        }
       }
     } else if (exception instanceof Error) {
       this.logger.error(
@@ -59,6 +73,7 @@ export class AllExceptionsFilter implements ExceptionFilter {
       statusCode,
       message,
       error,
+      ...(details ? { details } : {}),
       path: request.url,
       timestamp: new Date().toISOString(),
     };
