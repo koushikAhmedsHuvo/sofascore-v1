@@ -1,14 +1,14 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get } from "@nestjs/common";
 import {
   HealthCheck,
   HealthCheckService,
   TypeOrmHealthIndicator,
   HttpHealthIndicator,
   HealthCheckResult,
-} from '@nestjs/terminus';
-import { ApiOperation, ApiOkResponse, ApiTags } from '@nestjs/swagger';
-import { SofaContractService } from '../contract/sofa-contract.service';
-import { HealthCheckResponseDto, LivenessResponseDto } from '../../common/dto';
+} from "@nestjs/terminus";
+import { ApiOperation, ApiOkResponse, ApiTags } from "@nestjs/swagger";
+import { SofaContractService } from "../contract/sofa-contract.service";
+import { HealthCheckResponseDto, LivenessResponseDto } from "../../common/dto";
 
 /**
  * Health endpoints for orchestrators (K8s, Docker, load balancers).
@@ -17,8 +17,8 @@ import { HealthCheckResponseDto, LivenessResponseDto } from '../../common/dto';
  * - **GET /liveness** — process only (always fast)
  * - **GET /readiness** — DB only (used before receiving traffic)
  */
-@ApiTags('Health & Observability')
-@Controller('health')
+@ApiTags("Health & Observability")
+@Controller("health")
 export class HealthController {
   constructor(
     private readonly health: HealthCheckService,
@@ -30,13 +30,13 @@ export class HealthController {
   @Get()
   @HealthCheck()
   @ApiOperation({
-    summary: 'Full health check',
+    summary: "Full health check",
     description:
-      'PostgreSQL ping + HTTP GET to the provider health URL from SofaContractService. ' +
-      'Returns Terminus `HealthCheckResult`.',
+      "PostgreSQL ping + HTTP GET to the provider health URL from SofaContractService. " +
+      "Returns Terminus `HealthCheckResult`.",
   })
   @ApiOkResponse({
-    description: 'Terminus aggregated health document.',
+    description: "Terminus aggregated health document.",
     type: HealthCheckResponseDto,
   })
   check(): Promise<HealthCheckResult> {
@@ -44,32 +44,34 @@ export class HealthController {
     const providerHeaders = this.sofaContract.buildProviderHeaders();
 
     return this.health.check([
-      () => this.db.pingCheck('postgresql'),
+      () => this.db.pingCheck("postgresql"),
       () =>
-        this.http.pingCheck('sportsdata365-provider', providerUrl, {
+        this.http.pingCheck("sportsdata365-provider", providerUrl, {
           headers: providerHeaders,
         }),
     ]);
   }
 
-  @Get('liveness')
+  @Get("liveness")
   @ApiOperation({
-    summary: 'Liveness probe',
-    description: 'Returns 200 if the Node process is running. Does not check DB or provider.',
+    summary: "Liveness probe",
+    description:
+      "Returns 200 if the Node process is running. Does not check DB or provider.",
   })
   @ApiOkResponse({ type: LivenessResponseDto })
   liveness(): LivenessResponseDto {
-    return { status: 'ok', timestamp: new Date().toISOString() };
+    return { status: "ok", timestamp: new Date().toISOString() };
   }
 
-  @Get('readiness')
+  @Get("readiness")
   @HealthCheck()
   @ApiOperation({
-    summary: 'Readiness probe',
-    description: 'Returns 200 only when PostgreSQL accepts connections. Use before routing traffic.',
+    summary: "Readiness probe",
+    description:
+      "Returns 200 only when PostgreSQL accepts connections. Use before routing traffic.",
   })
   @ApiOkResponse({ type: HealthCheckResponseDto })
   readiness(): Promise<HealthCheckResult> {
-    return this.health.check([() => this.db.pingCheck('postgresql')]);
+    return this.health.check([() => this.db.pingCheck("postgresql")]);
   }
 }

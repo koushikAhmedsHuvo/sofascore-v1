@@ -1,4 +1,12 @@
-import { Controller, Get, Param, Query, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  Query,
+  Req,
+  Res,
+  UseGuards,
+} from "@nestjs/common";
 import {
   ApiHeader,
   ApiOperation,
@@ -6,11 +14,11 @@ import {
   ApiQuery,
   ApiResponse,
   ApiTags,
-} from '@nestjs/swagger';
-import { Request, Response } from 'express';
-import { ThrottlerGuard } from '@nestjs/throttler';
-import { SnapshotService } from '../snapshot/snapshot.service';
-import { normalizePath } from '../../shared/utils/path.utils';
+} from "@nestjs/swagger";
+import { Request, Response } from "express";
+import { ThrottlerGuard } from "@nestjs/throttler";
+import { SnapshotService } from "../snapshot/snapshot.service";
+import { normalizePath } from "../../shared/utils/path.utils";
 /**
  * Wildcard proxy controller — the primary public surface.
  *
@@ -27,9 +35,9 @@ import { normalizePath } from '../../shared/utils/path.utils';
  *   GET /api/v1/sofa/football/team/27/events/next/0
  *   GET /api/v1/sofa/football/event/15624970/incidents
  */
-@ApiTags('Sofa Proxy (DB-first)')
+@ApiTags("Sofa Proxy (DB-first)")
 @UseGuards(ThrottlerGuard)
-@Controller('sofa')
+@Controller("sofa")
 export class ProxyController {
   constructor(private readonly snapshotService: SnapshotService) {}
 
@@ -37,61 +45,70 @@ export class ProxyController {
    * Catch-all wildcard: serves any SofaScore-compatible path.
    * Returns raw provider JSON; adds tracing headers (see @ApiHeader below).
    */
-  @Get(':sport/*path')
+  @Get(":sport/*path")
   @ApiOperation({
-    summary: 'DB-first SofaScore proxy',
+    summary: "DB-first SofaScore proxy",
     description:
-      'Returns raw SofaScore-shaped JSON. Checks PostgreSQL first; on miss or stale TTL, ' +
-      'fetches from the configured provider (e.g. sportsdata365) and persists a snapshot.',
+      "Returns raw SofaScore-shaped JSON. Checks PostgreSQL first; on miss or stale TTL, " +
+      "fetches from the configured provider (e.g. sportsdata365) and persists a snapshot.",
   })
   @ApiParam({
-    name: 'sport',
-    description: 'Sport slug as used in provider paths (football, tennis, basketball, …).',
-    example: 'football',
+    name: "sport",
+    description:
+      "Sport slug as used in provider paths (football, tennis, basketball, …).",
+    example: "football",
   })
   @ApiParam({
-    name: 'path',
+    name: "path",
     description:
-      'Everything after /sofa/:sport/ — same suffix as www.sofascore.com/api/v1/{path}.',
-    example: 'unique-tournament/7/scheduled-events/2026-04-04',
+      "Everything after /sofa/:sport/ — same suffix as www.sofascore.com/api/v1/{path}.",
+    example: "unique-tournament/7/scheduled-events/2026-04-04",
   })
   @ApiHeader({
-    name: 'X-Sofa-Source',
-    description: 'Where the payload came from: `database` (cache hit) or `provider` (fresh fetch).',
-    schema: { type: 'string', enum: ['database', 'provider'] },
+    name: "X-Sofa-Source",
+    description:
+      "Where the payload came from: `database` (cache hit) or `provider` (fresh fetch).",
+    schema: { type: "string", enum: ["database", "provider"] },
   })
   @ApiHeader({
-    name: 'X-Sofa-Path',
-    description: 'Normalized relative path (no leading slash).',
-    example: 'event/13981730/incidents',
+    name: "X-Sofa-Path",
+    description: "Normalized relative path (no leading slash).",
+    example: "event/13981730/incidents",
   })
   @ApiHeader({
-    name: 'X-Sofa-Fetched-At',
-    description: 'ISO timestamp when the snapshot was written.',
+    name: "X-Sofa-Fetched-At",
+    description: "ISO timestamp when the snapshot was written.",
   })
   @ApiHeader({
-    name: 'X-Sofa-Expires-At',
-    description: 'ISO expiry for this snapshot TTL, or the literal `immutable` for finished data.',
+    name: "X-Sofa-Expires-At",
+    description:
+      "ISO expiry for this snapshot TTL, or the literal `immutable` for finished data.",
   })
   @ApiHeader({
-    name: 'Cache-Control',
-    description: 'Short public cache when served from DB; no-cache on provider miss.',
+    name: "Cache-Control",
+    description:
+      "Short public cache when served from DB; no-cache on provider miss.",
   })
   @ApiResponse({
     status: 200,
     description:
-      'Raw JSON body — **exact shape from SofaScore / sportsdata365** (varies by path). ' +
-      'See `SofaProxyExampleEventDto` for one illustrative fragment only.',
+      "Raw JSON body — **exact shape from SofaScore / sportsdata365** (varies by path). " +
+      "See `SofaProxyExampleEventDto` for one illustrative fragment only.",
     schema: {
-      type: 'object',
+      type: "object",
       additionalProperties: true,
-      example: { event: { id: 13981730, tournament: { name: 'Premier League' } } },
+      example: {
+        event: { id: 13981730, tournament: { name: "Premier League" } },
+      },
     },
   })
-  @ApiResponse({ status: 429, description: 'Throttled — too many requests from this IP.' })
+  @ApiResponse({
+    status: 429,
+    description: "Throttled — too many requests from this IP.",
+  })
   async proxyGet(
-    @Param('sport') sport: string,
-    @Param('path') pathParam: string | string[],
+    @Param("sport") sport: string,
+    @Param("path") pathParam: string | string[],
     @Query() query: Record<string, string>,
     @Req() req: Request & { sofaRawResponse?: boolean },
     @Res() res: Response,
@@ -100,26 +117,26 @@ export class ProxyController {
     req.sofaRawResponse = true;
 
     const wildcardPath = Array.isArray(pathParam)
-      ? pathParam.join('/')
+      ? pathParam.join("/")
       : pathParam;
     const sofaPath = normalizePath(wildcardPath);
 
-    const { payload, source, snapshot } =
-      await this.snapshotService.getOrFetch(sofaPath, query, sport);
+    const { payload, source, snapshot } = await this.snapshotService.getOrFetch(
+      sofaPath,
+      query,
+      sport,
+    );
 
-    res.setHeader('X-Sofa-Source', source);
-    res.setHeader('X-Sofa-Path', sofaPath);
+    res.setHeader("X-Sofa-Source", source);
+    res.setHeader("X-Sofa-Path", sofaPath);
+    res.setHeader("X-Sofa-Fetched-At", snapshot.fetchedAt?.toISOString() ?? "");
     res.setHeader(
-      'X-Sofa-Fetched-At',
-      snapshot.fetchedAt?.toISOString() ?? '',
+      "X-Sofa-Expires-At",
+      snapshot.expiresAt?.toISOString() ?? "immutable",
     );
     res.setHeader(
-      'X-Sofa-Expires-At',
-      snapshot.expiresAt?.toISOString() ?? 'immutable',
-    );
-    res.setHeader(
-      'Cache-Control',
-      source === 'database' ? 'public, max-age=60' : 'no-cache',
+      "Cache-Control",
+      source === "database" ? "public, max-age=60" : "no-cache",
     );
 
     res.json(payload);
