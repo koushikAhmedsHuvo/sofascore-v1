@@ -1,8 +1,8 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { Cron, CronExpression } from '@nestjs/schedule';
-import { ConfigService } from '@nestjs/config';
-import { IngestionService } from './ingestion.service';
-import { SnapshotService } from '../snapshot/snapshot.service';
+import { Injectable, Logger } from "@nestjs/common";
+import { Cron, CronExpression } from "@nestjs/schedule";
+import { ConfigService } from "@nestjs/config";
+import { IngestionService } from "./ingestion.service";
+import { SnapshotService } from "../snapshot/snapshot.service";
 
 /**
  * Full SofaScore cron scheduler.
@@ -38,12 +38,15 @@ export class IngestionCron {
    * Every 30 seconds — re-fetch incidents + statistics for in-progress events.
    * Uses the sofa_events table to identify currently live match IDs.
    */
-  @Cron('*/30 * * * * *')
+  @Cron("*/30 * * * * *")
   async cronLiveMatchDetails(): Promise<void> {
     try {
       await this.ingestionService.refreshLiveMatchDetails();
     } catch (err) {
-      this.logger.error('[CRON] live-match-details failed', (err as Error).stack);
+      this.logger.error(
+        "[CRON] live-match-details failed",
+        (err as Error).stack,
+      );
     }
   }
 
@@ -56,7 +59,7 @@ export class IngestionCron {
     try {
       await this.ingestionService.refreshLiveTournaments();
     } catch (err) {
-      this.logger.error('[CRON] live-tournaments failed', (err as Error).stack);
+      this.logger.error("[CRON] live-tournaments failed", (err as Error).stack);
     }
   }
 
@@ -68,11 +71,14 @@ export class IngestionCron {
    */
   @Cron(CronExpression.EVERY_5_MINUTES)
   async cronScheduledEventsToday(): Promise<void> {
-    this.logger.log('[CRON] scheduled-events-today');
+    this.logger.log("[CRON] scheduled-events-today");
     try {
       await this.ingestionService.ingestScheduledEventsForDate(new Date());
     } catch (err) {
-      this.logger.error('[CRON] scheduled-events-today failed', (err as Error).stack);
+      this.logger.error(
+        "[CRON] scheduled-events-today failed",
+        (err as Error).stack,
+      );
     }
   }
 
@@ -86,7 +92,10 @@ export class IngestionCron {
     try {
       await this.ingestionService.ingestSportScheduledTournaments(new Date());
     } catch (err) {
-      this.logger.error('[CRON] sport-scheduled-tournaments failed', (err as Error).stack);
+      this.logger.error(
+        "[CRON] sport-scheduled-tournaments failed",
+        (err as Error).stack,
+      );
     }
   }
 
@@ -101,7 +110,10 @@ export class IngestionCron {
     try {
       await this.ingestionService.ingestScheduledEventsForDate(tomorrow);
     } catch (err) {
-      this.logger.error('[CRON] scheduled-events-tomorrow failed', (err as Error).stack);
+      this.logger.error(
+        "[CRON] scheduled-events-tomorrow failed",
+        (err as Error).stack,
+      );
     }
   }
 
@@ -111,13 +123,13 @@ export class IngestionCron {
    * Daily 01:30 UTC — newly-added-events + global config/reference data.
    * country/alpha2, config/default-unique-tournaments, odds/providers, etc.
    */
-  @Cron('0 30 1 * * *')
+  @Cron("0 30 1 * * *")
   async cronGlobalConfig(): Promise<void> {
-    this.logger.log('[CRON] global-config');
+    this.logger.log("[CRON] global-config");
     try {
       await this.ingestionService.ingestGlobalConfig();
     } catch (err) {
-      this.logger.error('[CRON] global-config failed', (err as Error).stack);
+      this.logger.error("[CRON] global-config failed", (err as Error).stack);
     }
   }
 
@@ -125,14 +137,14 @@ export class IngestionCron {
    * Daily 02:00 UTC — delete expired snapshots.
    * Immutable historical events (expires_at IS NULL) are never deleted.
    */
-  @Cron('0 0 2 * * *')
+  @Cron("0 0 2 * * *")
   async cronCleanup(): Promise<void> {
-    this.logger.log('[CRON] cleanup-expired-snapshots');
+    this.logger.log("[CRON] cleanup-expired-snapshots");
     try {
       const deleted = await this.snapshotService.deleteExpired();
       this.logger.log(`[CRON] cleanup deleted ${deleted} expired snapshots`);
     } catch (err) {
-      this.logger.error('[CRON] cleanup failed', (err as Error).stack);
+      this.logger.error("[CRON] cleanup failed", (err as Error).stack);
     }
   }
 
@@ -140,13 +152,16 @@ export class IngestionCron {
    * Daily 03:00 UTC — historical backfill for scheduled events.
    * Fills gaps for N days back (default 365) for all priority tournaments.
    */
-  @Cron('0 0 3 * * *')
+  @Cron("0 0 3 * * *")
   async cronHistoricalBackfill(): Promise<void> {
-    this.logger.log('[CRON] historical-backfill');
+    this.logger.log("[CRON] historical-backfill");
     try {
       await this.ingestionService.backfillHistoricalEvents();
     } catch (err) {
-      this.logger.error('[CRON] historical-backfill failed', (err as Error).stack);
+      this.logger.error(
+        "[CRON] historical-backfill failed",
+        (err as Error).stack,
+      );
     }
   }
 
@@ -155,13 +170,16 @@ export class IngestionCron {
    * Fetches incidents, statistics, h2h, highlights for matches we have
    * in sofa_events but haven't yet ingested sub-endpoint data for.
    */
-  @Cron('0 30 3 * * *')
+  @Cron("0 30 3 * * *")
   async cronBackfillMatchDetails(): Promise<void> {
-    this.logger.log('[CRON] backfill-match-details');
+    this.logger.log("[CRON] backfill-match-details");
     try {
       await this.ingestionService.backfillMatchDetailsForFinishedEvents(100);
     } catch (err) {
-      this.logger.error('[CRON] backfill-match-details failed', (err as Error).stack);
+      this.logger.error(
+        "[CRON] backfill-match-details failed",
+        (err as Error).stack,
+      );
     }
   }
 
@@ -170,13 +188,43 @@ export class IngestionCron {
    * unique-tournament/{id}, /seasons, /standings/total, /cuptrees,
    * top-players, sport categories.
    */
-  @Cron('0 0 4 * * *')
+  @Cron("0 0 4 * * *")
   async cronMetadata(): Promise<void> {
-    this.logger.log('[CRON] metadata-tournaments');
+    this.logger.log("[CRON] metadata-tournaments");
     try {
       await this.ingestionService.ingestTournamentMetadata();
     } catch (err) {
-      this.logger.error('[CRON] metadata-tournaments failed', (err as Error).stack);
+      this.logger.error(
+        "[CRON] metadata-tournaments failed",
+        (err as Error).stack,
+      );
+    }
+  }
+
+  /**
+   * Daily 10:20 UTC — pre-warm player statistics.
+   *
+   * Discovers player IDs from cached team roster snapshots (team/{id}/players),
+   * then fetches:
+   *   player/{id}/statistics          — career aggregate stats
+   *   player/{id}/statistics/seasons  — list of seasons with data
+   *
+   * After this cron runs, `player/{playerId}/statistics` requests will be
+   * served from the local DB (source: "local-db") instead of hitting the
+   * external provider on every request.
+   *
+   * Runs AFTER metadata cron (04:00) so team roster snapshots are fresh.
+   */
+  @Cron("0 20 10 * * *")
+  async cronPlayerStatistics(): Promise<void> {
+    this.logger.log("[CRON] player-statistics");
+    try {
+      await this.ingestionService.ingestPlayerStatistics();
+    } catch (err) {
+      this.logger.error(
+        "[CRON] player-statistics failed",
+        (err as Error).stack,
+      );
     }
   }
 }

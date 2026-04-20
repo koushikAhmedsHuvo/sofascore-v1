@@ -1,7 +1,10 @@
-import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { appendQueryString, SofascoreNewsPostsQueryParams } from './sofa-api-query-params';
-import { SOFASCORE_DOCUMENTED_PATH_TEMPLATES } from './sofa-documented-paths.catalog';
+import { Injectable } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import {
+  appendQueryString,
+  SofascoreNewsPostsQueryParams,
+} from "./sofa-api-query-params";
+import { SOFASCORE_DOCUMENTED_PATH_TEMPLATES } from "./sofa-documented-paths.catalog";
 
 /**
  * **Singleton** (Nest default scope): one instance per application process.
@@ -25,18 +28,18 @@ export class SofaContractService {
 
   getProviderBaseUrl(): string {
     return (
-      this.config.get<string>('provider.baseUrl') ??
-      'https://sportsdata365.com/football/api/v1/h2h/sports'
+      this.config.get<string>("provider.baseUrl") ??
+      "https://sportsdata365.com/football/api/v1/h2h/sports"
     );
   }
 
   /** Full URL for Terminus HTTP ping (provider liveness). */
   getProviderHealthCheckUrl(): string {
     const rel =
-      this.config.get<string>('sofaContract.healthProbeRelativePath') ??
-      'sport/football/categories/all';
-    const base = this.getProviderBaseUrl().replace(/\/+$/, '');
-    return `${base}/${rel.replace(/^\/+/, '')}`;
+      this.config.get<string>("sofaContract.healthProbeRelativePath") ??
+      "sport/football/categories/all";
+    const base = this.getProviderBaseUrl().replace(/\/+$/, "");
+    return `${base}/${rel.replace(/^\/+/, "")}`;
   }
 
   /**
@@ -47,21 +50,26 @@ export class SofaContractService {
    * If a future provider requires one, set PROVIDER_API_KEY in env.
    */
   buildProviderHeaders(): Record<string, string> {
-    const apiKey    = this.config.get<string>('provider.apiKey') ?? '';
-    const authHdr   = this.config.get<string>('provider.authHeaderName') ?? 'x-api-key';
-    const referer   = this.config.get<string>('provider.referer')   ?? 'https://www.sofascore.com';
-    const origin    = this.config.get<string>('provider.origin')    ?? 'https://www.sofascore.com';
-    const userAgent = this.config.get<string>('provider.userAgent') ??
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
-      '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36';
+    const apiKey = this.config.get<string>("provider.apiKey") ?? "";
+    const authHdr =
+      this.config.get<string>("provider.authHeaderName") ?? "x-api-key";
+    const referer =
+      this.config.get<string>("provider.referer") ??
+      "https://www.sofascore.com";
+    const origin =
+      this.config.get<string>("provider.origin") ?? "https://www.sofascore.com";
+    const userAgent =
+      this.config.get<string>("provider.userAgent") ??
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+        "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
     const headers: Record<string, string> = {
-      'User-Agent':      userAgent,
-      Referer:           referer,
-      Origin:            origin,
-      Accept:            'application/json, text/plain, */*',
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Cache-Control':   'no-cache',
+      "User-Agent": userAgent,
+      Referer: referer,
+      Origin: origin,
+      Accept: "application/json, text/plain, */*",
+      "Accept-Language": "en-US,en;q=0.9",
+      "Cache-Control": "no-cache",
     };
 
     if (apiKey) headers[authHdr] = apiKey;
@@ -71,19 +79,31 @@ export class SofaContractService {
   // ─── Config tunables ───────────────────────────────────────────────────────
 
   getDefaultSport(): string {
-    return this.config.get<string>('sofaContract.defaultSport') ?? 'football';
+    return this.config.get<string>("sofaContract.defaultSport") ?? "football";
+  }
+
+  /**
+   * All sports enabled for active ingestion — driven by `SOFA_ACTIVE_SPORTS` env var.
+   * Default: ['football', 'basketball', 'cricket', 'tennis'].
+   */
+  getActiveSports(): string[] {
+    return (
+      this.config.get<string[]>("sofaContract.activeSports") ?? ["football"]
+    );
   }
 
   getOddsProviderId(): number {
-    return this.config.get<number>('sofaContract.oddsProviderId') ?? 1;
+    return this.config.get<number>("sofaContract.oddsProviderId") ?? 1;
   }
 
   getTeamEventsPageIndex(): number {
-    return this.config.get<number>('sofaContract.teamEventsPageIndex') ?? 0;
+    return this.config.get<number>("sofaContract.teamEventsPageIndex") ?? 0;
   }
 
   getTournamentSeasonsLookback(): number {
-    return this.config.get<number>('sofaContract.tournamentSeasonsLookback') ?? 2;
+    return (
+      this.config.get<number>("sofaContract.tournamentSeasonsLookback") ?? 2
+    );
   }
 
   /**
@@ -95,7 +115,7 @@ export class SofaContractService {
    * instead of this method — it returns the dynamically discovered list.
    */
   getConfigCountryCodes(): string[] {
-    return this.config.get<string[]>('sofaContract.configCountryCodes') ?? [];
+    return this.config.get<string[]>("sofaContract.configCountryCodes") ?? [];
   }
 
   // =========================================================================
@@ -149,7 +169,10 @@ export class SofaContractService {
   }
 
   /** `sport/football/scheduled-tournaments/2026-04-04` (non-paginated) */
-  sportScheduledTournaments(dateYyyyMmDd: string, sport = this.getDefaultSport()): string {
+  sportScheduledTournaments(
+    dateYyyyMmDd: string,
+    sport = this.getDefaultSport(),
+  ): string {
     return `sport/${sport}/scheduled-tournaments/${dateYyyyMmDd}`;
   }
 
@@ -171,7 +194,10 @@ export class SofaContractService {
    * Returns ALL individual matches (not just tournament lists) for a sport/date.
    * Distinct from `scheduled-tournaments`. Confirmed for tennis tab (Antigravity).
    */
-  sportScheduledEvents(dateYyyyMmDd: string, sport = this.getDefaultSport()): string {
+  sportScheduledEvents(
+    dateYyyyMmDd: string,
+    sport = this.getDefaultSport(),
+  ): string {
     return `sport/${sport}/scheduled-events/${dateYyyyMmDd}`;
   }
 
@@ -246,7 +272,10 @@ export class SofaContractService {
    * `tournament/40604/season/91185/standings/home`
    * Non-unique `tournament/{id}` competition id (see event.tournament.id in captures).
    */
-  competitionTournamentStandingsHome(tournamentId: number, seasonId: number): string {
+  competitionTournamentStandingsHome(
+    tournamentId: number,
+    seasonId: number,
+  ): string {
     return `tournament/${tournamentId}/season/${seasonId}/standings/home`;
   }
 
@@ -254,7 +283,10 @@ export class SofaContractService {
    * `tournament/40604/season/91185/standings/away`
    * Non-unique competition id — away table.
    */
-  competitionTournamentStandingsAway(tournamentId: number, seasonId: number): string {
+  competitionTournamentStandingsAway(
+    tournamentId: number,
+    seasonId: number,
+  ): string {
     return `tournament/${tournamentId}/season/${seasonId}/standings/away`;
   }
 
@@ -348,7 +380,10 @@ export class SofaContractService {
    * `unique-tournament/11165/season/91185/player-statistics/types`
    * Lists which player stat breakdowns exist for the season.
    */
-  tournamentSeasonPlayerStatisticsTypes(tournamentId: number, seasonId: number): string {
+  tournamentSeasonPlayerStatisticsTypes(
+    tournamentId: number,
+    seasonId: number,
+  ): string {
     return `unique-tournament/${tournamentId}/season/${seasonId}/player-statistics/types`;
   }
 
@@ -378,7 +413,7 @@ export class SofaContractService {
   tournamentTopRatings(
     tournamentId: number,
     seasonId: number,
-    type: 'overall' | 'home' | 'away' = 'overall',
+    type: "overall" | "home" | "away" = "overall",
   ): string {
     return `unique-tournament/${tournamentId}/season/${seasonId}/top-ratings/${type}`;
   }
@@ -402,7 +437,11 @@ export class SofaContractService {
   }
 
   /** `unique-tournament/7/season/61627/team-of-the-week/{round}` */
-  tournamentTeamOfWeek(tournamentId: number, seasonId: number, round: number): string {
+  tournamentTeamOfWeek(
+    tournamentId: number,
+    seasonId: number,
+    round: number,
+  ): string {
     return `unique-tournament/${tournamentId}/season/${seasonId}/team-of-the-week/${round}`;
   }
 
@@ -410,7 +449,10 @@ export class SofaContractService {
    * `unique-tournament/11165/season/91185/power-rankings/rounds`
    * Captured: cricket + NFL competition pages.
    */
-  tournamentSeasonPowerRankingsRounds(tournamentId: number, seasonId: number): string {
+  tournamentSeasonPowerRankingsRounds(
+    tournamentId: number,
+    seasonId: number,
+  ): string {
     return `unique-tournament/${tournamentId}/season/${seasonId}/power-rankings/rounds`;
   }
 
@@ -540,7 +582,10 @@ export class SofaContractService {
    * `event/15711539/team-streaks/betting-odds/1`
    * Cricket capture — streak data with odds provider segment.
    */
-  eventTeamStreaksBettingOdds(eventId: number, providerId = this.getOddsProviderId()): string {
+  eventTeamStreaksBettingOdds(
+    eventId: number,
+    providerId = this.getOddsProviderId(),
+  ): string {
     return `event/${eventId}/team-streaks/betting-odds/${providerId}`;
   }
 
@@ -607,7 +652,7 @@ export class SofaContractService {
 
   /** `event/newly-added-events` — recently added matches */
   eventNewlyAdded(): string {
-    return 'event/newly-added-events';
+    return "event/newly-added-events";
   }
 
   /**
@@ -615,7 +660,7 @@ export class SofaContractService {
    * AI-generated pre-match analysis text. Language param is typically `en`.
    * Confirmed from Antigravity live capture on football match page.
    */
-  eventAiInsights(eventId: number, lang = 'en'): string {
+  eventAiInsights(eventId: number, lang = "en"): string {
     return `event/${eventId}/ai-insights/${lang}`;
   }
 
@@ -659,7 +704,10 @@ export class SofaContractService {
   // ─── Odds ──────────────────────────────────────────────────────────────────
 
   /** `event/15624970/odds/1/featured` */
-  eventOddsFeatured(eventId: number, providerId = this.getOddsProviderId()): string {
+  eventOddsFeatured(
+    eventId: number,
+    providerId = this.getOddsProviderId(),
+  ): string {
     return `event/${eventId}/odds/${providerId}/featured`;
   }
 
@@ -669,7 +717,10 @@ export class SofaContractService {
   }
 
   /** `event/15624970/provider/1/winning-odds` */
-  eventWinningOdds(eventId: number, providerId = this.getOddsProviderId()): string {
+  eventWinningOdds(
+    eventId: number,
+    providerId = this.getOddsProviderId(),
+  ): string {
     return `event/${eventId}/provider/${providerId}/winning-odds`;
   }
 
@@ -761,7 +812,7 @@ export class SofaContractService {
     teamId: number,
     tournamentId: number,
     seasonId: number,
-    type: 'overall' | 'home' | 'away' = 'overall',
+    type: "overall" | "home" | "away" = "overall",
   ): string {
     return `team/${teamId}/unique-tournament/${tournamentId}/season/${seasonId}/statistics/${type}`;
   }
@@ -807,7 +858,7 @@ export class SofaContractService {
     teamId: number,
     tournamentId: number,
     seasonId: number,
-    type: 'overall' | 'home' | 'away' = 'overall',
+    type: "overall" | "home" | "away" = "overall",
   ): string {
     return `team/${teamId}/unique-tournament/${tournamentId}/season/${seasonId}/top-players/${type}`;
   }
@@ -880,7 +931,7 @@ export class SofaContractService {
     playerId: number,
     tournamentId: number,
     seasonId: number,
-    type: 'overall' | 'home' | 'away' = 'overall',
+    type: "overall" | "home" | "away" = "overall",
   ): string {
     return `player/${playerId}/unique-tournament/${tournamentId}/season/${seasonId}/statistics/${type}`;
   }
@@ -916,6 +967,19 @@ export class SofaContractService {
    */
   playerStatisticsOverview(playerId: number): string {
     return `player/${playerId}/statistics`;
+  }
+
+  /**
+   * Paths pre-warmed by the nightly player-statistics cron.
+   * Fetches the aggregate statistics overview and the seasons index for a single player.
+   *   `player/{id}/statistics`         — overall career stats
+   *   `player/{id}/statistics/seasons` — list of seasons the player has data for
+   */
+  playerStatisticsBundlePaths(playerId: number): string[] {
+    return [
+      this.playerStatisticsOverview(playerId),
+      this.playerStatisticsSeasons(playerId),
+    ];
   }
 
   /** `player/1449234/media` — photos / media hub */
@@ -961,12 +1025,12 @@ export class SofaContractService {
 
   /** `country/alpha2` — full country list with alpha2 codes */
   countryAlpha2(): string {
-    return 'country/alpha2';
+    return "country/alpha2";
   }
 
   /** `config/country-sport-priorities/country` — global sport priority map */
   configCountrySportPriorities(): string {
-    return 'config/country-sport-priorities/country';
+    return "config/country-sport-priorities/country";
   }
 
   /** `config/country-sport-priorities/country/BD` */
@@ -975,7 +1039,10 @@ export class SofaContractService {
   }
 
   /** `config/default-unique-tournaments/BD/football` */
-  configDefaultUniqueTournaments(countryCode: string, sport = this.getDefaultSport()): string {
+  configDefaultUniqueTournaments(
+    countryCode: string,
+    sport = this.getDefaultSport(),
+  ): string {
     return `config/default-unique-tournaments/${countryCode}/${sport}`;
   }
 
@@ -986,7 +1053,10 @@ export class SofaContractService {
    * Antigravity confirmed: `config/top-unique-tournaments/00/football` (global)
    * and `config/top-unique-tournaments/BD/football` (country-specific).
    */
-  configTopUniqueTournaments(countryCode: string, sport = this.getDefaultSport()): string {
+  configTopUniqueTournaments(
+    countryCode: string,
+    sport = this.getDefaultSport(),
+  ): string {
     return `config/top-unique-tournaments/${countryCode}/${sport}`;
   }
 
@@ -1064,7 +1134,7 @@ export class SofaContractService {
    * Confirmed from Antigravity live capture (search bar open state).
    */
   searchSuggestionsDefault(): string {
-    return 'search/suggestions/default';
+    return "search/suggestions/default";
   }
 
   // ─── Rankings ─────────────────────────────────────────────────────────────
@@ -1113,7 +1183,7 @@ export class SofaContractService {
 
   /** `odds/top-team-streaks/wins/all` — global top team winning streaks */
   oddsTopTeamStreaks(): string {
-    return 'odds/top-team-streaks/wins/all';
+    return "odds/top-team-streaks/wins/all";
   }
 
   /**
@@ -1138,7 +1208,7 @@ export class SofaContractService {
    * For captured query params (`?page=1&per_page=12&categories=news`), use
    * `sofascoreNewsPostsWithParams`.
    */
-  sofascoreNewsPosts(lang = 'en'): string {
+  sofascoreNewsPosts(lang = "en"): string {
     return `sofascore-news/${lang}/posts`;
   }
 
@@ -1147,12 +1217,15 @@ export class SofaContractService {
    * (e.g. `page`, `per_page`, `categories`).
    */
   sofascoreNewsPostsWithParams(
-    lang = 'en',
+    lang = "en",
     params?: SofascoreNewsPostsQueryParams,
   ): string {
     const base = this.sofascoreNewsPosts(lang);
     return params
-      ? appendQueryString(base, params as Record<string, string | number | boolean | undefined>)
+      ? appendQueryString(
+          base,
+          params as Record<string, string | number | boolean | undefined>,
+        )
       : base;
   }
 
@@ -1268,7 +1341,10 @@ export class SofaContractService {
    *
    * Pass an empty array to get only the sport-global paths.
    */
-  globalConfigPaths(countryCodes: string[], sport = this.getDefaultSport()): string[] {
+  globalConfigPaths(
+    countryCodes: string[],
+    sport = this.getDefaultSport(),
+  ): string[] {
     const paths: string[] = [
       this.countryAlpha2(),
       this.configCountrySportPriorities(),
@@ -1279,7 +1355,7 @@ export class SofaContractService {
       this.sofascoreNewsPosts(),
       this.searchSuggestionsDefault(),
       // Global (country-agnostic) top tournaments — code '00' = world
-      this.configTopUniqueTournaments('00', sport),
+      this.configTopUniqueTournaments("00", sport),
     ];
 
     for (const cc of countryCodes) {

@@ -32,7 +32,7 @@ export const providerConfig = registerAs('provider', () => ({
   authHeaderName: process.env.PROVIDER_AUTH_HEADER_NAME ?? 'x-api-key',
 
   timeoutMs:     parseInt(process.env.PROVIDER_TIMEOUT_MS    ?? '15000', 10),
-  retryAttempts: parseInt(process.env.PROVIDER_RETRY_ATTEMPTS ?? '3',    10),
+  retryAttempts: parseInt(process.env.PROVIDER_RETRY_ATTEMPTS ?? '5',    10),
   retryDelayMs:  parseInt(process.env.PROVIDER_RETRY_DELAY_MS ?? '1000', 10),
 
   /** Mimic the SofaScore browser client so the provider accepts the request. */

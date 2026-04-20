@@ -1,16 +1,16 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
-import { SnapshotService } from '../snapshot/snapshot.service';
-import { NormalizeService } from '../normalize/normalize.service';
-import { IngestionJobTrackerService } from './ingestion-job-tracker.service';
-import { SofaContractService } from '../contract/sofa-contract.service';
-import { TournamentRegistryService } from '../registry/tournament-registry.service';
-import { CountryRegistryService } from '../registry/country-registry.service';
-import { SofaEvent } from '../../shared/entities/sofa-event.entity';
-import { EventStatus } from '../../shared/enums/event-status.enum';
-import { formatDateForPath, dateRange } from '../../shared/utils/path.utils';
+import { Injectable, Logger } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository, In } from "typeorm";
+import { SnapshotService } from "../snapshot/snapshot.service";
+import { NormalizeService } from "../normalize/normalize.service";
+import { IngestionJobTrackerService } from "./ingestion-job-tracker.service";
+import { SofaContractService } from "../contract/sofa-contract.service";
+import { TournamentRegistryService } from "../registry/tournament-registry.service";
+import { CountryRegistryService } from "../registry/country-registry.service";
+import { SofaEvent } from "../../shared/entities/sofa-event.entity";
+import { EventStatus } from "../../shared/enums/event-status.enum";
+import { formatDateForPath, dateRange } from "../../shared/utils/path.utils";
 
 interface IngestionResult {
   pathsFetched: number;
@@ -59,7 +59,7 @@ export class IngestionService {
     private readonly eventRepo: Repository<SofaEvent>,
   ) {
     this.requestDelayMs =
-      this.configService.get<number>('ingestion.requestDelayMs') ?? 500;
+      this.configService.get<number>("ingestion.requestDelayMs") ?? 500;
   }
 
   // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -68,7 +68,12 @@ export class IngestionService {
     return this.contract.getDefaultSport();
   }
 
-  /** Live list — always reflects the latest DB state via the registry. */
+  /** All sports enabled for active ingestion — driven by `SOFA_ACTIVE_SPORTS` env var. */
+  private get activeSports(): string[] {
+    return this.contract.getActiveSports();
+  }
+
+  /** Live list — always reflects the latest DB state via the registry (default sport). */
   private get tournamentIds(): number[] {
     return this.registry.getActiveTournamentIds(this.sport);
   }
@@ -76,57 +81,66 @@ export class IngestionService {
   // ─── Scheduled events ─────────────────────────────────────────────────────
 
   /**
-   * For each active tournament id: fetch `scheduled-events/{date}`, snapshot + normalize.
-   * `date` is formatted in UTC via `formatDateForPath` (same convention as Sofa paths).
+   * For each active sport × active tournament id: fetch `scheduled-events/{date}`,
+   * snapshot + normalize. Loops over all `SOFA_ACTIVE_SPORTS`.
    */
   async ingestScheduledEventsForDate(date: Date = new Date()): Promise<void> {
     const dateStr = formatDateForPath(date);
-    const ids = this.tournamentIds;
 
-    const job = await this.jobTracker.startJob('scheduled-events', {
-      date: dateStr,
-      tournamentCount: ids.length,
-    });
+    for (const sport of this.activeSports) {
+      const ids = this.registry.getActiveTournamentIds(sport);
+      if (!ids.length) continue;
 
-    const result = this.emptyResult();
+      const job = await this.jobTracker.startJob("scheduled-events", {
+        date: dateStr,
+        sport,
+        tournamentCount: ids.length,
+      });
+      const result = this.emptyResult();
 
-    try {
-      for (const tournamentId of ids) {
-        await this.fetchOne(
-          this.contract.scheduledEvents(tournamentId, dateStr),
-          result,
-          async (payload) => {
-            const counts =
-              await this.normalizeService.normalizeScheduledEventsPayload(
-                payload,
-                this.sport,
-              );
-            result.rowsUpserted += counts.events + counts.teams + counts.tournaments;
-          },
-        );
-        await this.delay();
+      try {
+        for (const tournamentId of ids) {
+          await this.fetchOne(
+            this.contract.scheduledEvents(tournamentId, dateStr),
+            result,
+            async (payload) => {
+              const counts =
+                await this.normalizeService.normalizeScheduledEventsPayload(
+                  payload,
+                  sport,
+                );
+              result.rowsUpserted +=
+                counts.events + counts.teams + counts.tournaments;
+            },
+          );
+          await this.delay();
+        }
+        await this.jobTracker.finishJob(job, result);
+      } catch (err) {
+        await this.jobTracker.failJob(job, err as Error);
       }
-      await this.jobTracker.finishJob(job, result);
-    } catch (err) {
-      await this.jobTracker.failJob(job, err as Error);
     }
   }
 
   // ─── Live ─────────────────────────────────────────────────────────────────
 
-  /** Refreshes sport-level live tournament and live event list snapshots (short TTL paths). */
+  /** Refreshes sport-level live tournament and live event list snapshots for all active sports. */
   async refreshLiveTournaments(): Promise<void> {
-    const paths = [
-      this.contract.sportLiveTournaments(this.sport),
-      this.contract.sportEventsLive(this.sport),
-    ];
-    for (const path of paths) {
-      try {
-        await this.snapshotService.getOrFetch(path, {}, this.sport);
-      } catch (err) {
-        this.logger.warn(`Live refresh failed for ${path}: ${(err as Error).message}`);
+    for (const sport of this.activeSports) {
+      const paths = [
+        this.contract.sportLiveTournaments(sport),
+        this.contract.sportEventsLive(sport),
+      ];
+      for (const path of paths) {
+        try {
+          await this.snapshotService.getOrFetch(path, {}, sport);
+        } catch (err) {
+          this.logger.warn(
+            `Live refresh [${sport}] failed for ${path}: ${(err as Error).message}`,
+          );
+        }
+        await this.delay(200);
       }
-      await this.delay(200);
     }
   }
 
@@ -143,7 +157,7 @@ export class IngestionService {
           EventStatus.PAUSE,
         ]),
       },
-      select: ['sofaId'],
+      select: ["sofaId"],
     });
 
     if (!liveEvents.length) return;
@@ -151,7 +165,9 @@ export class IngestionService {
     this.logger.log(`Refreshing live details for ${liveEvents.length} events`);
 
     for (const event of liveEvents) {
-      for (const path of this.contract.liveVolatilePathsForEvent(event.sofaId)) {
+      for (const path of this.contract.liveVolatilePathsForEvent(
+        event.sofaId,
+      )) {
         try {
           await this.snapshotService.getOrFetch(path, {}, this.sport);
         } catch (err) {
@@ -168,7 +184,9 @@ export class IngestionService {
 
   /** Fetches every path in `matchDetailPaths` (full post-lineup bundle). */
   async ingestMatchDetailBundle(eventId: number): Promise<void> {
-    const job = await this.jobTracker.startJob('match-detail-bundle', { eventId });
+    const job = await this.jobTracker.startJob("match-detail-bundle", {
+      eventId,
+    });
     const result = this.emptyResult();
 
     try {
@@ -184,7 +202,7 @@ export class IngestionService {
 
   /** Fetches `teamBundlePaths` — roster, fixtures, stats references. */
   async ingestTeamBundle(teamId: number): Promise<void> {
-    const job = await this.jobTracker.startJob('team-bundle', { teamId });
+    const job = await this.jobTracker.startJob("team-bundle", { teamId });
     const result = this.emptyResult();
 
     try {
@@ -210,52 +228,60 @@ export class IngestionService {
     // Re-discover tournaments — this is the single place we update the registry.
     await this.registry.discoverAndRefresh();
 
-    const ids = this.tournamentIds;
-    const job = await this.jobTracker.startJob('metadata-tournaments', {
-      tournamentCount: ids.length,
-    });
-    const result = this.emptyResult();
     const lookback = this.contract.getTournamentSeasonsLookback();
 
-    try {
-      await this.fetchOne(this.contract.sportCategoriesAll(this.sport), result);
-      await this.delay();
+    for (const sport of this.activeSports) {
+      const ids = this.registry.getActiveTournamentIds(sport);
 
-      for (const tid of ids) {
-        const tournamentPaths = [
-          this.contract.uniqueTournament(tid),
-          this.contract.uniqueTournamentSeasons(tid),
-        ];
+      const job = await this.jobTracker.startJob("metadata-tournaments", {
+        sport,
+        tournamentCount: ids.length,
+      });
+      const result = this.emptyResult();
 
-        for (const path of tournamentPaths) {
-          await this.fetchOne(path, result);
-          await this.delay();
-        }
+      try {
+        await this.fetchOne(this.contract.sportCategoriesAll(sport), result);
+        await this.delay();
 
-        const seasonsSnapshot = await this.snapshotService
-          .findByPath(this.contract.uniqueTournamentSeasons(tid))
-          .catch(() => null);
+        for (const tid of ids) {
+          const tournamentPaths = [
+            this.contract.uniqueTournament(tid),
+            this.contract.uniqueTournamentSeasons(tid),
+          ];
 
-        if (seasonsSnapshot) {
-          const seasons =
-            (
-              seasonsSnapshot.payload as {
-                seasons?: Array<{ id: number }>;
+          for (const path of tournamentPaths) {
+            await this.fetchOne(path, result);
+            await this.delay();
+          }
+
+          const seasonsSnapshot = await this.snapshotService
+            .findByPath(this.contract.uniqueTournamentSeasons(tid))
+            .catch(() => null);
+
+          if (seasonsSnapshot) {
+            const seasons =
+              (
+                seasonsSnapshot.payload as {
+                  seasons?: Array<{ id: number }>;
+                }
+              ).seasons ?? [];
+
+            for (const season of seasons.slice(0, lookback)) {
+              for (const path of this.contract.seasonPathsForTournament(
+                tid,
+                season.id,
+              )) {
+                await this.fetchOne(path, result);
+                await this.delay();
               }
-            ).seasons ?? [];
-
-          for (const season of seasons.slice(0, lookback)) {
-            for (const path of this.contract.seasonPathsForTournament(tid, season.id)) {
-              await this.fetchOne(path, result);
-              await this.delay();
             }
           }
         }
-      }
 
-      await this.jobTracker.finishJob(job, result);
-    } catch (err) {
-      await this.jobTracker.failJob(job, err as Error);
+        await this.jobTracker.finishJob(job, result);
+      } catch (err) {
+        await this.jobTracker.failJob(job, err as Error);
+      }
     }
   }
 
@@ -264,14 +290,21 @@ export class IngestionService {
    * (and global `00` market) — see `SofaContractService.globalConfigPaths`.
    */
   async ingestGlobalConfig(): Promise<void> {
-    const job = await this.jobTracker.startJob('global-config', {});
+    const job = await this.jobTracker.startJob("global-config", {
+      sports: this.activeSports,
+    });
     const result = this.emptyResult();
 
     try {
       const countryCodes = this.countryRegistry.getActiveCountryCodes();
-      for (const path of this.contract.globalConfigPaths(countryCodes, this.sport)) {
-        await this.fetchOne(path, result);
-        await this.delay();
+      for (const sport of this.activeSports) {
+        for (const path of this.contract.globalConfigPaths(
+          countryCodes,
+          sport,
+        )) {
+          await this.fetchOne(path, result);
+          await this.delay();
+        }
       }
       await this.jobTracker.finishJob(job, result);
     } catch (err) {
@@ -289,7 +322,7 @@ export class IngestionService {
   async backfillHistoricalEvents(daysBack?: number): Promise<void> {
     const days =
       daysBack ??
-      this.configService.get<number>('ingestion.backfillDaysBack') ??
+      this.configService.get<number>("ingestion.backfillDaysBack") ??
       365;
 
     // Inclusive range [start, endDate] where endDate is **yesterday** (avoid partial “today” data).
@@ -299,41 +332,46 @@ export class IngestionService {
     startDate.setDate(startDate.getDate() - days);
 
     const dates = dateRange(startDate, endDate);
-    const ids = this.tournamentIds;
 
-    this.logger.log(
-      `Historical backfill: ${dates.length} days × ${ids.length} tournaments`,
-    );
+    for (const sport of this.activeSports) {
+      const ids = this.registry.getActiveTournamentIds(sport);
+      if (!ids.length) continue;
 
-    const job = await this.jobTracker.startJob('historical-backfill', {
-      daysBack: days,
-      dateRange: [formatDateForPath(startDate), formatDateForPath(endDate)],
-      tournamentCount: ids.length,
-    });
-    const result = this.emptyResult();
+      this.logger.log(
+        `Historical backfill [${sport}]: ${dates.length} days × ${ids.length} tournaments`,
+      );
 
-    try {
-      for (const dateStr of dates) {
-        for (const tournamentId of ids) {
-          await this.fetchOne(
-            this.contract.scheduledEvents(tournamentId, dateStr),
-            result,
-            async (payload) => {
-              const counts =
-                await this.normalizeService.normalizeScheduledEventsPayload(
-                  payload,
-                  this.sport,
-                );
-              result.rowsUpserted +=
-                counts.events + counts.teams + counts.tournaments;
-            },
-          );
-          await this.delay();
+      const job = await this.jobTracker.startJob("historical-backfill", {
+        sport,
+        daysBack: days,
+        dateRange: [formatDateForPath(startDate), formatDateForPath(endDate)],
+        tournamentCount: ids.length,
+      });
+      const result = this.emptyResult();
+
+      try {
+        for (const dateStr of dates) {
+          for (const tournamentId of ids) {
+            await this.fetchOne(
+              this.contract.scheduledEvents(tournamentId, dateStr),
+              result,
+              async (payload) => {
+                const counts =
+                  await this.normalizeService.normalizeScheduledEventsPayload(
+                    payload,
+                    sport,
+                  );
+                result.rowsUpserted +=
+                  counts.events + counts.teams + counts.tournaments;
+              },
+            );
+            await this.delay();
+          }
         }
+        await this.jobTracker.finishJob(job, result);
+      } catch (err) {
+        await this.jobTracker.failJob(job, err as Error);
       }
-      await this.jobTracker.finishJob(job, result);
-    } catch (err) {
-      await this.jobTracker.failJob(job, err as Error);
     }
   }
 
@@ -345,24 +383,26 @@ export class IngestionService {
   async backfillMatchDetailsForFinishedEvents(limit = 50): Promise<void> {
     const finishedEvents = await this.eventRepo.find({
       where: { statusType: EventStatus.FINISHED },
-      order: { startTimestamp: 'DESC' },
+      order: { startTimestamp: "DESC" },
       take: limit,
-      select: ['sofaId'],
+      select: ["sofaId"],
     });
 
     if (!finishedEvents.length) {
-      this.logger.log('No finished events found for detail backfill');
+      this.logger.log("No finished events found for detail backfill");
       return;
     }
 
-    const job = await this.jobTracker.startJob('backfill-match-details', {
+    const job = await this.jobTracker.startJob("backfill-match-details", {
       eventCount: finishedEvents.length,
     });
     const result = this.emptyResult();
 
     try {
       for (const event of finishedEvents) {
-        for (const path of this.contract.finishedEventBackfillPaths(event.sofaId)) {
+        for (const path of this.contract.finishedEventBackfillPaths(
+          event.sofaId,
+        )) {
           await this.fetchOne(path, result);
           await this.delay();
         }
@@ -377,22 +417,120 @@ export class IngestionService {
    * Single path: `sport/.../scheduled-tournaments/{date}` (home-page style listing).
    * Does not walk per-tournament ids — use `ingestScheduledEventsForDate` for that.
    */
-  async ingestSportScheduledTournaments(date: Date = new Date()): Promise<void> {
+  async ingestSportScheduledTournaments(
+    date: Date = new Date(),
+  ): Promise<void> {
     const dateStr = formatDateForPath(date);
-    const path = this.contract.sportScheduledTournaments(dateStr, this.sport);
-    await this.snapshotService
-      .getOrFetch(path, {}, this.sport)
-      .catch((err) =>
-        this.logger.warn(
-          `sport scheduled-tournaments failed for ${dateStr}: ${(err as Error).message}`,
-        ),
+    for (const sport of this.activeSports) {
+      const path = this.contract.sportScheduledTournaments(dateStr, sport);
+      await this.snapshotService
+        .getOrFetch(path, {}, sport)
+        .catch((err) =>
+          this.logger.warn(
+            `sport scheduled-tournaments [${sport}] failed for ${dateStr}: ${(err as Error).message}`,
+          ),
+        );
+      await this.delay(200);
+    }
+  }
+
+  // ─── Player statistics ────────────────────────────────────────────────────
+
+  /**
+   * Pre-warms `player/{id}/statistics` and `player/{id}/statistics/seasons`
+   * for every distinct player found in cached `team/{id}/players` roster
+   * snapshots. Player IDs are discovered lazily from the most recent events
+   * already in `sofa_events` — no hardcoded IDs anywhere.
+   *
+   * Strategy:
+   *  1. Collect distinct team IDs from the N most recent events in `sofa_events`.
+   *  2. For each team, load the cached `team/{id}/players` snapshot (DB only —
+   *     no provider call; if the roster was never fetched it is skipped).
+   *  3. Extract `players[].player.id` from the payload.
+   *  4. For each unique player (up to `limit`), call `fetchOne` for every path
+   *     in `contract.playerStatisticsBundlePaths` — which goes through the
+   *     standard DB-first cache so already-fresh rows are not re-fetched.
+   *
+   * @param limit   Max number of distinct player IDs to process per run
+   *                (default 200 — tune via cron or manual trigger).
+   * @param eventSampleSize  How many recent events to scan for team IDs.
+   */
+  async ingestPlayerStatistics(
+    limit = 200,
+    eventSampleSize = 100,
+  ): Promise<void> {
+    // 1. Distinct team IDs from recent events (no new injection needed)
+    const recentEvents = await this.eventRepo.find({
+      order: { startTimestamp: "DESC" },
+      take: eventSampleSize,
+      select: ["homeTeamSofaId", "awayTeamSofaId"],
+    });
+
+    const teamIds = [
+      ...new Set(
+        recentEvents.flatMap((e) => [e.homeTeamSofaId, e.awayTeamSofaId]),
+      ),
+    ];
+
+    const job = await this.jobTracker.startJob("player-statistics", {
+      teamCount: teamIds.length,
+      playerLimit: limit,
+    });
+    const result = this.emptyResult();
+    const seenPlayerIds = new Set<number>();
+
+    try {
+      outer: for (const teamId of teamIds) {
+        // 2. Roster snapshot — DB only, no provider fallback
+        const rosterSnapshot = await this.snapshotService
+          .findByPath(this.contract.teamPlayers(teamId))
+          .catch(() => null);
+
+        if (!rosterSnapshot) continue;
+
+        const players =
+          (
+            rosterSnapshot.payload as {
+              players?: Array<{ player?: { id?: number } }>;
+            }
+          ).players ?? [];
+
+        // 3. Extract player IDs
+        for (const entry of players) {
+          const playerId = entry?.player?.id;
+          if (!playerId || seenPlayerIds.has(playerId)) continue;
+          seenPlayerIds.add(playerId);
+
+          // 4. Fetch statistics bundle through the normal DB-first cache
+          for (const path of this.contract.playerStatisticsBundlePaths(
+            playerId,
+          )) {
+            await this.fetchOne(path, result);
+            await this.delay();
+          }
+
+          if (seenPlayerIds.size >= limit) break outer;
+        }
+      }
+
+      this.logger.log(
+        `[player-statistics] processed ${seenPlayerIds.size} players from ${teamIds.length} teams`,
       );
+      await this.jobTracker.finishJob(job, result);
+    } catch (err) {
+      await this.jobTracker.failJob(job, err as Error);
+    }
   }
 
   // ─── Internals ────────────────────────────────────────────────────────────
 
   private emptyResult(): IngestionResult {
-    return { pathsFetched: 0, rowsUpserted: 0, errorCount: 0, errorDetails: [] };
+    return {
+      pathsFetched: 0,
+      rowsUpserted: 0,
+      errorCount: 0,
+      errorDetails: [],
+    };
   }
 
   /**

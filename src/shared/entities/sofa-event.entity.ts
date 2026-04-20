@@ -35,6 +35,7 @@ import { EventStatus } from '../enums/event-status.enum';
 @Index(['homeTeamSofaId', 'awayTeamSofaId', 'startTimestamp'])
 @Index(['tournamentSofaId', 'startTimestamp'])
 @Index(['statusType', 'startTimestamp'])
+@Index(['sport', 'statusType', 'startTimestamp'])
 export class SofaEvent extends BaseEntity {
   /** SofaScore event integer ID — primary business key. */
   @Index({ unique: true })
