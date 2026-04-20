@@ -7,14 +7,14 @@ import {
   Injectable,
   Logger,
   ServiceUnavailableException,
-} from '@nestjs/common';
-import { HttpService } from '@nestjs/axios';
-import { ConfigService } from '@nestjs/config';
-import { firstValueFrom } from 'rxjs';
-import axiosRetry from 'axios-retry';
-import { normalizePath } from '../../shared/utils/path.utils';
-import { SofaContractService } from '../contract/sofa-contract.service';
-import { AlertService } from './alert.service';
+} from "@nestjs/common";
+import { HttpService } from "@nestjs/axios";
+import { ConfigService } from "@nestjs/config";
+import { firstValueFrom } from "rxjs";
+import axiosRetry from "axios-retry";
+import { normalizePath } from "../../shared/utils/path.utils";
+import { SofaContractService } from "../contract/sofa-contract.service";
+import { AlertService } from "./alert.service";
 
 @Injectable()
 export class ProviderClientService {
@@ -29,10 +29,10 @@ export class ProviderClientService {
     private readonly alertService: AlertService,
   ) {
     this.timeoutMs =
-      this.configService.get<number>('provider.timeoutMs') ?? 15000;
+      this.configService.get<number>("provider.timeoutMs") ?? 15000;
     this.maxAttempts = Math.max(
       1,
-      this.configService.get<number>('provider.retryAttempts') ?? 5,
+      this.configService.get<number>("provider.retryAttempts") ?? 5,
     );
     const retryCount = this.maxAttempts - 1;
 
@@ -64,7 +64,7 @@ export class ProviderClientService {
     params?: Record<string, string>,
   ): Promise<{ data: T; status: number }> {
     const normalizedPath = normalizePath(sofaPath);
-    const baseUrl = this.sofaContract.getProviderBaseUrl().replace(/\/+$/, '');
+    const baseUrl = this.sofaContract.getProviderBaseUrl().replace(/\/+$/, "");
     /** Single slash join — base URL must not end with `/`, path must not start with `/` after normalize. */
     const url = `${baseUrl}/${normalizedPath}`;
 
@@ -89,23 +89,25 @@ export class ProviderClientService {
       return { data: response.data, status: response.status };
     } catch (error) {
       const elapsed = Date.now() - startTime;
-      const status = (error as { response?: { status?: number } })?.response?.status;
-      const msg = `✗ Provider error after ${elapsed}ms for ${normalizedPath}: HTTP ${status ?? 'N/A'} — ${(error as Error).message}`;
+      const status = (error as { response?: { status?: number } })?.response
+        ?.status;
+      const msg = `✗ Provider error after ${elapsed}ms for ${normalizedPath}: HTTP ${status ?? "N/A"} — ${(error as Error).message}`;
       const retryCount =
-        ((error as { config?: { 'axios-retry'?: { retryCount?: number } } })
-          .config?.['axios-retry']?.retryCount ?? 0);
+        (error as { config?: { "axios-retry"?: { retryCount?: number } } })
+          .config?.["axios-retry"]?.retryCount ?? 0;
       const totalAttempts = retryCount + 1;
 
       // Alert when all configured retries were exhausted (network/5xx errors that were retried)
       // OR when the error was non-retryable (4xx) but the provider still returned no usable data.
       // Both cases mean the provider call completely failed.
       const retriesExhausted = totalAttempts >= this.maxAttempts;
-      const nonRetryableFailure = retryCount === 0 && status !== undefined && status >= 400;
+      const nonRetryableFailure =
+        retryCount === 0 && status !== undefined && status >= 400;
 
       if (retriesExhausted || nonRetryableFailure) {
         this.logger.warn(
           `Alert condition met — retriesExhausted=${retriesExhausted} nonRetryable=${nonRetryableFailure} ` +
-          `totalAttempts=${totalAttempts} maxAttempts=${this.maxAttempts} status=${status ?? 'N/A'}`,
+            `totalAttempts=${totalAttempts} maxAttempts=${this.maxAttempts} status=${status ?? "N/A"}`,
         );
         this.alertService.sendMaxRetryAlert({
           endpointUrl: url,
@@ -116,18 +118,18 @@ export class ProviderClientService {
       } else {
         this.logger.warn(
           `Alert NOT sent — totalAttempts=${totalAttempts} < maxAttempts=${this.maxAttempts}, ` +
-          `retryCount=${retryCount}, status=${status ?? 'N/A'} (retryable error, retries still in progress or config mismatch)`,
+            `retryCount=${retryCount}, status=${status ?? "N/A"} (retryable error, retries still in progress or config mismatch)`,
         );
       }
 
       if (status !== undefined && status >= 400 && status < 500) {
-        this.logger.warn(msg + ' (check provider API key / quota in env)');
+        this.logger.warn(msg + " (check provider API key / quota in env)");
       } else {
         this.logger.error(msg);
       }
 
       throw new ServiceUnavailableException({
-        message: 'Provider unavailable',
+        message: "Provider unavailable",
         path: normalizedPath,
         providerStatus: status,
       });

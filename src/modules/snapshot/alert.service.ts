@@ -53,7 +53,7 @@ export class AlertService {
       if (!to) {
         this.logger.error(
           "[AlertService] ALERT_EMAIL_TO env var is not set — max-retry alert was triggered but cannot be sent. " +
-          "Add ALERT_EMAIL_TO=your@email.com to your .env file.",
+            "Add ALERT_EMAIL_TO=your@email.com to your .env file.",
         );
         return;
       }
@@ -107,7 +107,7 @@ export class AlertService {
       if (!to) {
         this.logger.error(
           "[AlertService] ALERT_EMAIL_TO env var is not set — schema-mismatch alert was triggered but cannot be sent. " +
-          "Add ALERT_EMAIL_TO=your@email.com to your .env file.",
+            "Add ALERT_EMAIL_TO=your@email.com to your .env file.",
         );
         return;
       }
