@@ -1,9 +1,9 @@
-import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { QueryFailedError, Repository } from 'typeorm';
-import { SofaCountryEntity } from '../../shared/entities/sofa-country.entity';
-import { SofaContractService } from '../contract/sofa-contract.service';
-import { ProviderClientService } from '../snapshot/provider-client.service';
+import { Injectable, Logger, OnApplicationBootstrap } from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { QueryFailedError, Repository } from "typeorm";
+import { SofaCountryEntity } from "../../shared/entities/sofa-country.entity";
+import { SofaContractService } from "../contract/sofa-contract.service";
+import { ProviderClientService } from "../snapshot/provider-client.service";
 
 /**
  * Global **singleton** — the single source of truth for "which country codes
@@ -71,7 +71,7 @@ export class CountryRegistryService implements OnApplicationBootstrap {
    * Called on startup and by the daily cron.
    */
   async discoverAndRefresh(): Promise<{ upserted: number }> {
-    this.logger.log('[CountryRegistry] Starting country discovery...');
+    this.logger.log("[CountryRegistry] Starting country discovery...");
 
     const path = this.contract.configCountrySportPriorities();
     const limit = this.getLimit();
@@ -87,7 +87,7 @@ export class CountryRegistryService implements OnApplicationBootstrap {
 
     const entries = this.parseCountries(raw);
     if (entries.length === 0) {
-      this.logger.warn('[CountryRegistry] No countries parsed from response.');
+      this.logger.warn("[CountryRegistry] No countries parsed from response.");
       return { upserted: 0 };
     }
 
@@ -106,7 +106,7 @@ export class CountryRegistryService implements OnApplicationBootstrap {
           isActive: true,
         })) as object[],
       )
-      .orUpdate(['priority', 'is_active', 'last_refreshed_at'], ['alpha2'])
+      .orUpdate(["priority", "is_active", "last_refreshed_at"], ["alpha2"])
       .execute();
 
     await this.loadFromDb();
@@ -118,12 +118,25 @@ export class CountryRegistryService implements OnApplicationBootstrap {
   }
 
   async setActive(alpha2: string, active: boolean): Promise<void> {
-    await this.countryRepo.update({ alpha2: alpha2.toUpperCase() }, { isActive: active });
+    await this.countryRepo
+      .createQueryBuilder()
+      .insert()
+      .into(SofaCountryEntity)
+      .values({
+        alpha2: alpha2.toUpperCase(),
+        isActive: active,
+        priority: 999,
+      } as object)
+      .orUpdate(["is_active", "last_refreshed_at"], ["alpha2"])
+      .execute();
     await this.loadFromDb();
   }
 
   async setPriority(alpha2: string, priority: number): Promise<void> {
-    await this.countryRepo.update({ alpha2: alpha2.toUpperCase() }, { priority });
+    await this.countryRepo.update(
+      { alpha2: alpha2.toUpperCase() },
+      { priority },
+    );
     await this.loadFromDb();
   }
 
@@ -132,7 +145,7 @@ export class CountryRegistryService implements OnApplicationBootstrap {
   /** Caps how many countries we upsert from the discovery response (default 50). */
   private getLimit(): number {
     const raw = process.env.SOFA_COUNTRY_REGISTRY_LIMIT;
-    const parsed = parseInt(raw ?? '', 10);
+    const parsed = parseInt(raw ?? "", 10);
     return Number.isFinite(parsed) && parsed > 0 ? parsed : 50;
   }
 
@@ -141,16 +154,18 @@ export class CountryRegistryService implements OnApplicationBootstrap {
     try {
       const rows = await this.countryRepo.find({
         where: { isActive: true },
-        order: { priority: 'ASC' },
+        order: { priority: "ASC" },
       });
       this.activeCodes = rows.map((r) => r.alpha2);
-      this.logger.debug(`[CountryRegistry] Loaded ${this.activeCodes.length} active country codes from DB.`);
+      this.logger.debug(
+        `[CountryRegistry] Loaded ${this.activeCodes.length} active country codes from DB.`,
+      );
     } catch (err) {
       if (err instanceof QueryFailedError && this.isUndefinedTable(err)) {
         this.activeCodes = [];
         this.logger.error(
-          '[CountryRegistry] Table `sofa_countries` is missing. Apply migrations: `yarn migration:run` ' +
-            '(see src/database/data-source.ts). Using env seed until the table exists.',
+          "[CountryRegistry] Table `sofa_countries` is missing. Apply migrations: `yarn migration:run` " +
+            "(see src/database/data-source.ts). Using env seed until the table exists.",
         );
         return;
       }
@@ -161,7 +176,7 @@ export class CountryRegistryService implements OnApplicationBootstrap {
   /** PostgreSQL 42P01 — relation does not exist. */
   private isUndefinedTable(err: QueryFailedError): boolean {
     const code = (err.driverError as { code?: string } | undefined)?.code;
-    return code === '42P01';
+    return code === "42P01";
   }
 
   /**
@@ -172,15 +187,17 @@ export class CountryRegistryService implements OnApplicationBootstrap {
    * or a flat array — shape may vary. We try both shapes defensively and rank
    * by overall priority score (sum across sports), ascending.
    */
-  private parseCountries(raw: unknown): Array<{ alpha2: string; score: number }> {
-    if (!raw || typeof raw !== 'object') return [];
+  private parseCountries(
+    raw: unknown,
+  ): Array<{ alpha2: string; score: number }> {
+    if (!raw || typeof raw !== "object") return [];
 
     // Shape 1: { categories: [...] }
     const asObj = raw as Record<string, unknown>;
-    const list: unknown[] = Array.isArray(asObj['categories'])
-      ? (asObj['categories'] as unknown[])
-      : Array.isArray(asObj['data'])
-        ? (asObj['data'] as unknown[])
+    const list: unknown[] = Array.isArray(asObj["categories"])
+      ? (asObj["categories"] as unknown[])
+      : Array.isArray(asObj["data"])
+        ? (asObj["data"] as unknown[])
         : Array.isArray(raw)
           ? (raw as unknown[])
           : [];
@@ -188,22 +205,22 @@ export class CountryRegistryService implements OnApplicationBootstrap {
     const result: Array<{ alpha2: string; score: number }> = [];
 
     for (const item of list) {
-      if (!item || typeof item !== 'object') continue;
+      if (!item || typeof item !== "object") continue;
       const entry = item as Record<string, unknown>;
 
-      const alpha2 = (entry['alpha2'] ?? entry['country'] ?? '') as string;
+      const alpha2 = (entry["alpha2"] ?? entry["country"] ?? "") as string;
       if (!alpha2 || alpha2.length !== 2) continue;
 
       // Compute a priority score — lower = more important market
       let score = 0;
-      const priorities = entry['priority'];
-      if (priorities && typeof priorities === 'object') {
+      const priorities = entry["priority"];
+      if (priorities && typeof priorities === "object") {
         score = Object.values(priorities as Record<string, number>).reduce(
-          (sum, v) => sum + (typeof v === 'number' ? v : 0),
+          (sum, v) => sum + (typeof v === "number" ? v : 0),
           0,
         );
-      } else if (typeof entry['priority'] === 'number') {
-        score = entry['priority'] as number;
+      } else if (typeof entry["priority"] === "number") {
+        score = entry["priority"] as number;
       }
 
       result.push({ alpha2: alpha2.toUpperCase(), score });
