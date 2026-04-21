@@ -139,6 +139,17 @@ export class ProxyController {
       source === "database" ? "public, max-age=60" : "no-cache",
     );
 
-    res.json(payload);
+    res.json({
+      ...payload,
+      _source: {
+        retrievedFrom: source === "database" ? "local-db" : "external-api",
+        message:
+          source === "database"
+            ? "Data retrieved from local database (cached snapshot)"
+            : "Data retrieved from external provider API (live fetch)",
+        fetchedAt: snapshot.fetchedAt?.toISOString() ?? null,
+        expiresAt: snapshot.expiresAt?.toISOString() ?? "immutable",
+      },
+    });
   }
 }

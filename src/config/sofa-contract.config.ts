@@ -1,4 +1,4 @@
-import { registerAs } from '@nestjs/config';
+import { registerAs } from "@nestjs/config";
 
 /**
  * Single source of truth for SofaScore-compatible *path semantics* and
@@ -7,21 +7,33 @@ import { registerAs } from '@nestjs/config';
  * Provider base URL + HTTP client identity stay in `provider.config.ts`.
  * Change env vars here — not string literals in ingestion / proxy code.
  */
-export const sofaContractConfig = registerAs('sofaContract', () => ({
+export const sofaContractConfig = registerAs("sofaContract", () => ({
   /** Default sport slug in API paths (e.g. football). */
-  defaultSport: process.env.SOFA_DEFAULT_SPORT ?? 'football',
+  defaultSport: process.env.SOFA_DEFAULT_SPORT ?? "football",
+
+  /**
+   * All sports the ingestion engine actively pre-warms.
+   * Set SOFA_ACTIVE_SPORTS as comma-separated slugs (e.g. football,basketball,cricket,tennis).
+   * Falls back to all four when the env var is unset.
+   */
+  activeSports: (
+    process.env.SOFA_ACTIVE_SPORTS ?? "football,basketball,cricket,tennis"
+  )
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean),
 
   /** Odds provider id segment: event/{id}/odds/{this}/featured */
-  oddsProviderId: parseInt(process.env.SOFA_ODDS_PROVIDER_ID ?? '1', 10),
+  oddsProviderId: parseInt(process.env.SOFA_ODDS_PROVIDER_ID ?? "1", 10),
 
   /** Pagination cursor for team/{id}/events/next/{n} and .../last/{n} */
-  teamEventsPageIndex: parseInt(process.env.SOFA_TEAM_EVENTS_PAGE ?? '0', 10),
+  teamEventsPageIndex: parseInt(process.env.SOFA_TEAM_EVENTS_PAGE ?? "0", 10),
 
   /**
    * How many latest seasons to pull standings / cup trees / top-players for.
    */
   tournamentSeasonsLookback: parseInt(
-    process.env.SOFA_TOURNAMENT_SEASONS_LOOKBACK ?? '2',
+    process.env.SOFA_TOURNAMENT_SEASONS_LOOKBACK ?? "2",
     10,
   ),
 
@@ -36,8 +48,8 @@ export const sofaContractConfig = registerAs('sofaContract', () => ({
    *
    * Example: SOFA_CONFIG_COUNTRY_CODES=BD,US,GB
    */
-  configCountryCodes: (process.env.SOFA_CONFIG_COUNTRY_CODES ?? '')
-    .split(',')
+  configCountryCodes: (process.env.SOFA_CONFIG_COUNTRY_CODES ?? "")
+    .split(",")
     .map((c) => c.trim().toUpperCase())
     .filter(Boolean),
 
@@ -46,6 +58,5 @@ export const sofaContractConfig = registerAs('sofaContract', () => ({
    * Must be a cheap GET that returns 200 when the provider is up.
    */
   healthProbeRelativePath:
-    process.env.SOFA_HEALTH_PROBE_PATH ??
-    'sport/football/categories/all',
+    process.env.SOFA_HEALTH_PROBE_PATH ?? "sport/football/categories/all",
 }));

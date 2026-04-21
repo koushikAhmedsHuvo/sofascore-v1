@@ -34,7 +34,6 @@ export class IngestionJob extends BaseEntity {
   })
   status: IngestionJobStatus;
 
-  @Index()
   @Column({ name: 'scheduled_at', type: 'timestamptz' })
   scheduledAt: Date;
 

@@ -2,6 +2,7 @@ import {
   Injectable,
   Logger,
   NotFoundException,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -15,6 +16,7 @@ import {
 } from '../../shared/utils/path.utils';
 import { ProviderClientService } from './provider-client.service';
 import { ConfigService } from '@nestjs/config';
+import { SofaScoreValidatorService } from './sofascore-validator.service';
 
 export interface SnapshotReadResult {
   payload: Record<string, unknown>;
@@ -45,6 +47,7 @@ export class SnapshotService {
     private readonly snapshotRepo: Repository<RawSnapshot>,
     private readonly providerClient: ProviderClientService,
     private readonly configService: ConfigService,
+    private readonly validatorService: SofaScoreValidatorService,
   ) {
     const ttl = this.configService.get<Record<string, number>>('ingestion.ttl') ?? {};
     this.ttlMap = {
@@ -92,9 +95,40 @@ export class SnapshotService {
       params,
     );
 
+    if (this.shouldValidateSchema(pathKey)) {
+      const validationResult = this.validatorService.validateResponse(
+        data,
+        this.buildProviderUrl(pathKey),
+      );
+
+      if (!validationResult.valid) {
+        this.logger.warn(
+          `Schema mismatch for ${pathKey}; skipping snapshot upsert and returning provider unavailable`,
+        );
+
+        throw new ServiceUnavailableException({
+          message: 'Provider response schema mismatch',
+          path: pathKey,
+          issues: validationResult.issues,
+          missingKeys: validationResult.missingKeys,
+        });
+      }
+    }
+
     // 3. Persist / upsert
     const snapshot = await this.upsert(pathKey, paramsHash, data, sport, status);
     return { payload: data, source: 'provider', snapshot };
+  }
+
+  private shouldValidateSchema(pathKey: string): boolean {
+    // The minimum required Zod shape is the event detail payload.
+    return /^event\/[^/]+$/.test(pathKey);
+  }
+
+  private buildProviderUrl(pathKey: string): string {
+    const baseUrl =
+      this.configService.get<string>('provider.baseUrl')?.replace(/\/+$/, '') ?? '';
+    return `${baseUrl}/${pathKey}`;
   }
 
   /**
