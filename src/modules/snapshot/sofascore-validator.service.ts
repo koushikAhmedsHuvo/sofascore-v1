@@ -17,12 +17,16 @@ const SofascoreEventSchema = z.object({
     id: z.number(),
     name: z.string(),
   }),
-  homeScore: z.object({
-    current: z.number().nullable(),
-  }),
-  awayScore: z.object({
-    current: z.number().nullable(),
-  }),
+  homeScore: z
+    .object({
+      current: z.number().nullable().optional(),
+    })
+    .optional(),
+  awayScore: z
+    .object({
+      current: z.number().nullable().optional(),
+    })
+    .optional(),
   status: z.object({
     type: z.string(),
     description: z.string(),
@@ -38,8 +42,6 @@ const EXPECTED_KEY_PATHS = [
   "homeTeam.name",
   "awayTeam.id",
   "awayTeam.name",
-  "homeScore.current",
-  "awayScore.current",
   "status.type",
   "status.description",
 ];
@@ -63,7 +65,17 @@ export class SofaScoreValidatorService {
   constructor(private readonly alertService: AlertService) {}
 
   validateResponse(data: unknown, endpointUrl = "unknown"): ValidationResult {
-    const parsed = SofascoreEventSchema.safeParse(data);
+    // Provider wraps event detail under an "event" key: { event: { id, slug, ... } }.
+    // Unwrap it so the schema validates the event object directly.
+    const payload =
+      data !== null &&
+      typeof data === "object" &&
+      !Array.isArray(data) &&
+      "event" in (data as Record<string, unknown>)
+        ? (data as Record<string, unknown>)["event"]
+        : data;
+
+    const parsed = SofascoreEventSchema.safeParse(payload);
 
     if (parsed.success) {
       return { valid: true, data: parsed.data };
@@ -74,7 +86,7 @@ export class SofaScoreValidatorService {
       message: issue.message,
     }));
 
-    const receivedKeys = this.flattenObjectKeys(data);
+    const receivedKeys = this.flattenObjectKeys(payload);
     const missingKeys = EXPECTED_KEY_PATHS.filter(
       (expectedPath) => !receivedKeys.includes(expectedPath),
     );

@@ -3,13 +3,14 @@ import {
   Logger,
   OnApplicationBootstrap,
   ServiceUnavailableException,
-} from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { SofaTournamentEntity } from '../../shared/entities/sofa-tournament.entity';
-import { SofaContractService } from '../contract/sofa-contract.service';
-import { ProviderClientService } from '../snapshot/provider-client.service';
-import { CountryRegistryService } from './country-registry.service';
+} from "@nestjs/common";
+import { InjectRepository } from "@nestjs/typeorm";
+import { Repository } from "typeorm";
+import { SofaTournamentEntity } from "../../shared/entities/sofa-tournament.entity";
+import { SofaSportEntity } from "../../shared/entities/sofa-sport.entity";
+import { SofaContractService } from "../contract/sofa-contract.service";
+import { ProviderClientService } from "../snapshot/provider-client.service";
+import { CountryRegistryService } from "./country-registry.service";
 
 /**
  * Global **singleton** — the single source of truth for "which tournaments
@@ -42,6 +43,8 @@ export class TournamentRegistryService implements OnApplicationBootstrap {
   constructor(
     @InjectRepository(SofaTournamentEntity)
     private readonly tournamentRepo: Repository<SofaTournamentEntity>,
+    @InjectRepository(SofaSportEntity)
+    private readonly sportRepo: Repository<SofaSportEntity>,
     private readonly contract: SofaContractService,
     private readonly providerClient: ProviderClientService,
     private readonly countryRegistry: CountryRegistryService,
@@ -83,42 +86,55 @@ export class TournamentRegistryService implements OnApplicationBootstrap {
   }
 
   /**
-   * Trigger a full re-discovery from the provider API.
-   * Called by the nightly metadata cron.
+   * Trigger a full re-discovery from the provider API for **all active sports**.
+   * Called by the nightly metadata cron and on application bootstrap.
    */
   async discoverAndRefresh(): Promise<{ discovered: number; updated: number }> {
-    const sport = this.contract.getDefaultSport();
-    this.logger.log(`[Registry] Starting tournament discovery for sport: ${sport}`);
+    const sports = this.contract.getActiveSports();
+    this.logger.log(
+      `[Registry] Starting tournament discovery for sports: ${sports.join(", ")}`,
+    );
 
     let discovered = 0;
     let updated = 0;
 
-    try {
-      // Step 1: All categories → extract every uniqueTournament
-      discovered = await this.discoverFromCategories(sport);
+    for (const sport of sports) {
+      try {
+        // Step 1: All categories → extract every uniqueTournament for this sport
+        const sportDiscovered = await this.discoverFromCategories(sport);
+        discovered += sportDiscovered;
 
-      // Step 2: Prioritize using country default-tournament lists
-      updated = await this.applyPriorityFromDefaults(sport);
+        // Step 2: Prioritize using country default-tournament lists
+        const sportUpdated = await this.applyPriorityFromDefaults(sport);
+        updated += sportUpdated;
 
-      // Step 3: Reload memory registry from updated DB
-      await this.loadFromDb();
+        // Step 3: Upsert into sofa_sports so the sport is tracked in DB
+        await this.upsertSport(sport, sportDiscovered);
 
-      this.logger.log(
-        `[Registry] Discovery done: ${discovered} tournaments found, ${updated} priorities updated`,
-      );
-    } catch (err) {
-      if (err instanceof ServiceUnavailableException) {
-        this.logger.warn(
-          `[Registry] Discovery skipped — provider unreachable or rejected the request ` +
-            `(e.g. missing API key → HTTP 403). Will retry on cron. ${(err as Error).message}`,
+        this.logger.log(
+          `[Registry] [${sport}] ${sportDiscovered} tournaments found, ${sportUpdated} priorities updated`,
         );
-        return { discovered, updated };
+      } catch (err) {
+        if (err instanceof ServiceUnavailableException) {
+          this.logger.warn(
+            `[Registry] [${sport}] Discovery skipped — provider unreachable or rejected ` +
+              `the request (e.g. missing API key → HTTP 403). Will retry on cron. ${(err as Error).message}`,
+          );
+          continue;
+        }
+        this.logger.error(
+          `[Registry] [${sport}] Discovery error: ${(err as Error).message}`,
+          (err as Error).stack,
+        );
       }
-      this.logger.error(
-        `[Registry] Discovery error: ${(err as Error).message}`,
-        (err as Error).stack,
-      );
     }
+
+    // Reload memory registry from DB after all sports are processed
+    await this.loadFromDb();
+
+    this.logger.log(
+      `[Registry] Discovery complete — total: ${discovered} tournaments, ${updated} priorities updated`,
+    );
 
     return { discovered, updated };
   }
@@ -142,6 +158,31 @@ export class TournamentRegistryService implements OnApplicationBootstrap {
   }
 
   // ─── Discovery internals ──────────────────────────────────────────────────
+
+  /**
+   * Upserts a row in `sofa_sports` to record that this sport was discovered
+   * and how many tournaments were found. Idempotent — keyed on `slug`.
+   */
+  private async upsertSport(
+    slug: string,
+    tournamentCount: number,
+  ): Promise<void> {
+    await this.sportRepo
+      .createQueryBuilder()
+      .insert()
+      .into(SofaSportEntity)
+      .values({
+        slug,
+        isActive: true,
+        tournamentCount,
+        lastDiscoveredAt: new Date(),
+      })
+      .orUpdate(
+        ["is_active", "tournament_count", "last_discovered_at", "updated_at"],
+        ["slug"],
+      )
+      .execute();
+  }
 
   /**
    * Fetches `sport/{sport}/categories/all` and upserts every
@@ -171,9 +212,11 @@ export class TournamentRegistryService implements OnApplicationBootstrap {
     let count = 0;
 
     for (const cat of categories) {
-      const countryAlpha2 =
-        cat.country?.alpha2 ?? cat.alpha2 ?? null;
-      const tournaments = await this.fetchCategoryTournaments(cat.id, cat.tournaments ?? []);
+      const countryAlpha2 = cat.country?.alpha2 ?? cat.alpha2 ?? null;
+      const tournaments = await this.fetchCategoryTournaments(
+        cat.id,
+        cat.tournaments ?? [],
+      );
 
       for (const t of tournaments) {
         await this.tournamentRepo
@@ -199,21 +242,21 @@ export class TournamentRegistryService implements OnApplicationBootstrap {
           } as object)
           .orUpdate(
             [
-              'name',
-              'slug',
-              'category_name',
-              'category_id',
-              'category_slug',
-              'country_alpha2',
-              'primary_color_hex',
-              'secondary_color_hex',
-              'user_count',
-              'is_active',
-              'last_refreshed_at',
-              'raw_meta',
-              'updated_at',
+              "name",
+              "slug",
+              "category_name",
+              "category_id",
+              "category_slug",
+              "country_alpha2",
+              "primary_color_hex",
+              "secondary_color_hex",
+              "user_count",
+              "is_active",
+              "last_refreshed_at",
+              "raw_meta",
+              "updated_at",
             ],
-            ['sofa_id'],
+            ["sofa_id"],
           )
           .execute();
 
@@ -221,7 +264,9 @@ export class TournamentRegistryService implements OnApplicationBootstrap {
       }
     }
 
-    this.logger.log(`[Registry] Discovered ${count} tournaments from categories`);
+    this.logger.log(
+      `[Registry] Discovered ${count} tournaments from categories`,
+    );
     return count;
   }
 
@@ -240,14 +285,16 @@ export class TournamentRegistryService implements OnApplicationBootstrap {
       secondaryColorHex?: string;
       userCount?: number;
     }>,
-  ): Promise<Array<{
-    id: number;
-    name: string;
-    slug?: string;
-    primaryColorHex?: string;
-    secondaryColorHex?: string;
-    userCount?: number;
-  }>> {
+  ): Promise<
+    Array<{
+      id: number;
+      name: string;
+      slug?: string;
+      primaryColorHex?: string;
+      secondaryColorHex?: string;
+      userCount?: number;
+    }>
+  > {
     if (inline.length > 0) return inline;
 
     try {
@@ -272,7 +319,10 @@ export class TournamentRegistryService implements OnApplicationBootstrap {
         }>;
       }>(this.contract.categoryUniqueTournaments(categoryId));
 
-      if (Array.isArray(data.uniqueTournaments) && data.uniqueTournaments.length > 0) {
+      if (
+        Array.isArray(data.uniqueTournaments) &&
+        data.uniqueTournaments.length > 0
+      ) {
         return data.uniqueTournaments;
       }
 
@@ -341,8 +391,8 @@ export class TournamentRegistryService implements OnApplicationBootstrap {
   private async loadFromDb(): Promise<void> {
     const tournaments = await this.tournamentRepo.find({
       where: { isActive: true },
-      order: { priority: 'ASC', sofaId: 'ASC' },
-      select: ['sofaId', 'sport', 'priority'],
+      order: { priority: "ASC", sofaId: "ASC" },
+      select: ["sofaId", "sport", "priority"],
     });
 
     const grouped = new Map<string, number[]>();
@@ -357,7 +407,7 @@ export class TournamentRegistryService implements OnApplicationBootstrap {
     const totalCount = tournaments.length;
     const sportSummary = [...grouped.entries()]
       .map(([s, ids]) => `${s}: ${ids.length}`)
-      .join(', ');
+      .join(", ");
 
     this.logger.log(
       `[Registry] Loaded ${totalCount} active tournaments from DB (${sportSummary})`,

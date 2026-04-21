@@ -451,71 +451,76 @@ export class IngestionService {
    *     in `contract.playerStatisticsBundlePaths` — which goes through the
    *     standard DB-first cache so already-fresh rows are not re-fetched.
    *
-   * @param limit   Max number of distinct player IDs to process per run
-   *                (default 200 — tune via cron or manual trigger).
-   * @param eventSampleSize  How many recent events to scan for team IDs.
+   * No cap on player count — all distinct players found across all team rosters
+   * for each active sport are processed.
    */
-  async ingestPlayerStatistics(
-    limit = 200,
-    eventSampleSize = 100,
-  ): Promise<void> {
-    // 1. Distinct team IDs from recent events (no new injection needed)
-    const recentEvents = await this.eventRepo.find({
-      order: { startTimestamp: "DESC" },
-      take: eventSampleSize,
-      select: ["homeTeamSofaId", "awayTeamSofaId"],
-    });
-
-    const teamIds = [
-      ...new Set(
-        recentEvents.flatMap((e) => [e.homeTeamSofaId, e.awayTeamSofaId]),
-      ),
-    ];
-
+  async ingestPlayerStatistics(): Promise<void> {
     const job = await this.jobTracker.startJob("player-statistics", {
-      teamCount: teamIds.length,
-      playerLimit: limit,
+      sports: this.activeSports,
     });
     const result = this.emptyResult();
-    const seenPlayerIds = new Set<number>();
 
     try {
-      outer: for (const teamId of teamIds) {
-        // 2. Roster snapshot — DB only, no provider fallback
-        const rosterSnapshot = await this.snapshotService
-          .findByPath(this.contract.teamPlayers(teamId))
-          .catch(() => null);
+      // Process each active sport independently so snapshots are tagged correctly.
+      for (const sport of this.activeSports) {
+        const seenPlayerIds = new Set<number>();
 
-        if (!rosterSnapshot) continue;
+        // 1. Distinct team IDs from ALL events for this sport.
+        const recentEvents = await this.eventRepo.find({
+          where: { sport },
+          order: { startTimestamp: "DESC" },
+          select: ["homeTeamSofaId", "awayTeamSofaId"],
+        });
 
-        const players =
-          (
-            rosterSnapshot.payload as {
-              players?: Array<{ player?: { id?: number } }>;
-            }
-          ).players ?? [];
-
-        // 3. Extract player IDs
-        for (const entry of players) {
-          const playerId = entry?.player?.id;
-          if (!playerId || seenPlayerIds.has(playerId)) continue;
-          seenPlayerIds.add(playerId);
-
-          // 4. Fetch statistics bundle through the normal DB-first cache
-          for (const path of this.contract.playerStatisticsBundlePaths(
-            playerId,
-          )) {
-            await this.fetchOne(path, result);
-            await this.delay();
-          }
-
-          if (seenPlayerIds.size >= limit) break outer;
+        if (!recentEvents.length) {
+          this.logger.debug(
+            `[player-statistics] no recent events for sport=${sport}, skipping`,
+          );
+          continue;
         }
+
+        const teamIds = [
+          ...new Set(
+            recentEvents.flatMap((e) => [e.homeTeamSofaId, e.awayTeamSofaId]),
+          ),
+        ];
+
+        for (const teamId of teamIds) {
+          // 2. Roster snapshot — DB only, no provider fallback.
+          const rosterSnapshot = await this.snapshotService
+            .findByPath(this.contract.teamPlayers(teamId))
+            .catch(() => null);
+
+          if (!rosterSnapshot) continue;
+
+          const players =
+            (
+              rosterSnapshot.payload as {
+                players?: Array<{ player?: { id?: number } }>;
+              }
+            ).players ?? [];
+
+          // 3. Extract player IDs.
+          for (const entry of players) {
+            const playerId = entry?.player?.id;
+            if (!playerId || seenPlayerIds.has(playerId)) continue;
+            seenPlayerIds.add(playerId);
+
+            // 4. Fetch statistics bundle — pass sport so snapshot is tagged correctly.
+            for (const path of this.contract.playerStatisticsBundlePaths(
+              playerId,
+            )) {
+              await this.fetchOne(path, result, undefined, sport);
+              await this.delay();
+            }
+          }
+        }
+
+        this.logger.log(
+          `[player-statistics] [${sport}] processed ${seenPlayerIds.size} players from ${teamIds.length} teams`,
+        );
       }
 
-      this.logger.log(
-        `[player-statistics] processed ${seenPlayerIds.size} players from ${teamIds.length} teams`,
-      );
       await this.jobTracker.finishJob(job, result);
     } catch (err) {
       await this.jobTracker.failJob(job, err as Error);
@@ -538,17 +543,20 @@ export class IngestionService {
    * `rowsUpserted` by **1 per successful path** (approximate snapshot row count);
    * when `afterFetch` normalizes scheduled events, additional rows are added there.
    * Errors are counted but do not abort the whole job unless `afterFetch` throws.
+   *
+   * @param sport Optional sport slug override; defaults to `this.sport` (football).
    */
   private async fetchOne(
     path: string,
     result: IngestionResult,
     afterFetch?: (payload: Record<string, unknown>) => Promise<void>,
+    sport?: string,
   ): Promise<void> {
     try {
       const { payload } = await this.snapshotService.getOrFetch(
         path,
         {},
-        this.sport,
+        sport ?? this.sport,
       );
       result.pathsFetched++;
       result.rowsUpserted++;

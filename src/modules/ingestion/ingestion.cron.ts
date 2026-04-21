@@ -202,10 +202,10 @@ export class IngestionCron {
   }
 
   /**
-   * Daily 10:20 UTC — pre-warm player statistics.
+   * Daily 06:30 UTC — pre-warm player statistics for all active sports.
    *
    * Discovers player IDs from cached team roster snapshots (team/{id}/players),
-   * then fetches:
+   * then fetches for every active sport:
    *   player/{id}/statistics          — career aggregate stats
    *   player/{id}/statistics/seasons  — list of seasons with data
    *
@@ -215,7 +215,7 @@ export class IngestionCron {
    *
    * Runs AFTER metadata cron (04:00) so team roster snapshots are fresh.
    */
-  @Cron("0 20 10 * * *")
+  @Cron("0 30 6 * * *")
   async cronPlayerStatistics(): Promise<void> {
     this.logger.log("[CRON] player-statistics");
     try {
