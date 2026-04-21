@@ -79,16 +79,19 @@ export class TournamentRegistryController {
   }
 
   @Post('refresh')
-  @HttpCode(HttpStatus.OK)
+  @HttpCode(HttpStatus.ACCEPTED)
   @ApiOperation({
     summary: 'Re-run full tournament discovery',
     description:
+      'Fires discovery in the background and returns 202 immediately. ' +
       'Calls `sport/{sport}/categories/all` and merges default-tournament priorities per country.',
   })
   @ApiOkResponse({ type: TournamentRefreshResponseDto })
-  async refresh(): Promise<TournamentRefreshResponseDto> {
-    const result = await this.registry.discoverAndRefresh();
-    return { ok: true, ...result };
+  refresh(): TournamentRefreshResponseDto {
+    this.registry.discoverAndRefresh().catch(() => {
+      // errors are logged inside discoverAndRefresh
+    });
+    return { ok: true, message: 'Discovery started in background' };
   }
 
   @Post('tournaments/:id/activate')

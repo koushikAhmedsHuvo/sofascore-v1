@@ -65,11 +65,8 @@ export class TournamentRefreshResponseDto {
   @ApiProperty({ example: true })
   ok: boolean;
 
-  @ApiProperty({ example: 120 })
-  discovered: number;
-
-  @ApiProperty({ example: 80 })
-  updated: number;
+  @ApiProperty({ example: 'Discovery started in background' })
+  message: string;
 }
 
 export class TournamentToggleResponseDto {
