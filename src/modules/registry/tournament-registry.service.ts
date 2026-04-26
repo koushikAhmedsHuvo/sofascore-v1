@@ -4,6 +4,7 @@ import {
   OnApplicationBootstrap,
   ServiceUnavailableException,
 } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
 import { SofaTournamentEntity } from "../../shared/entities/sofa-tournament.entity";
@@ -48,6 +49,7 @@ export class TournamentRegistryService implements OnApplicationBootstrap {
     private readonly contract: SofaContractService,
     private readonly providerClient: ProviderClientService,
     private readonly countryRegistry: CountryRegistryService,
+    private readonly configService: ConfigService,
   ) {}
 
   // ─── Lifecycle ─────────────────────────────────────────────────────────────
@@ -60,6 +62,17 @@ export class TournamentRegistryService implements OnApplicationBootstrap {
    */
   async onApplicationBootstrap(): Promise<void> {
     await this.loadFromDb();
+
+    const shouldRefresh =
+      this.configService.get<boolean>(
+        "ingestion.enableRegistryBootstrapRefresh",
+      ) ?? false;
+    if (!shouldRefresh) {
+      this.logger.log(
+        "[Registry] Bootstrap provider refresh disabled; using DB state.",
+      );
+      return;
+    }
 
     // Refresh in background — never block startup
     this.discoverAndRefresh().catch((err) =>
@@ -89,8 +102,9 @@ export class TournamentRegistryService implements OnApplicationBootstrap {
    * Trigger a full re-discovery from the provider API for **all active sports**.
    * Called by the nightly metadata cron and on application bootstrap.
    */
-  async discoverAndRefresh(): Promise<{ discovered: number; updated: number }> {
-    const sports = this.contract.getActiveSports();
+  async discoverAndRefresh(
+    sports = this.contract.getActiveSports(),
+  ): Promise<{ discovered: number; updated: number }> {
     this.logger.log(
       `[Registry] Starting tournament discovery for sports: ${sports.join(", ")}`,
     );

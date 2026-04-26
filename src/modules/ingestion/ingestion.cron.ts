@@ -1,158 +1,202 @@
-import { Injectable, Logger } from "@nestjs/common";
-import { Cron, CronExpression } from "@nestjs/schedule";
+import { Injectable, Logger, OnApplicationBootstrap } from "@nestjs/common";
+import { Cron } from "@nestjs/schedule";
 import { ConfigService } from "@nestjs/config";
 import { IngestionService } from "./ingestion.service";
-import { SnapshotService } from "../snapshot/snapshot.service";
 
-/**
- * Full SofaScore cron scheduler.
- *
- * Schedule map by frequency:
- *
- *  Every 30s   → live match incidents + statistics (for in-progress events)
- *  Every 1min  → live tournament list + live event list
- *  Every 5min  → today's scheduled events per tournament
- *  Every 10min → sport-level scheduled-tournaments (home page view)
- *  Every 30min → tomorrow's scheduled events
- *  Daily 01:30 → newly-added-events + global config refresh
- *  Daily 02:00 → cleanup expired snapshots
- *  Daily 03:00 → historical scheduled-events backfill
- *  Daily 03:30 → backfill match-detail bundle for recent finished events
- *  Daily 04:00 → tournament metadata (standings, seasons, cup trees)
- *
- * All methods guard internally — cron failures never crash the process.
- */
+const LOCAL_CRON_TIMEZONE = "Asia/Dhaka";
+
 @Injectable()
-export class IngestionCron {
+export class IngestionCron implements OnApplicationBootstrap {
   private readonly logger = new Logger(IngestionCron.name);
+  private bootstrapStarted = false;
 
   constructor(
     private readonly ingestionService: IngestionService,
-    private readonly snapshotService: SnapshotService,
     private readonly configService: ConfigService,
   ) {}
 
-  // ─── Live (high-frequency) ────────────────────────────────────────────────
+  private get liveCronEnabled(): boolean {
+    return this.configService.get<boolean>("ingestion.enableLiveCron") ?? false;
+  }
 
-  /**
-   * Every 30 seconds — re-fetch incidents + statistics for in-progress events.
-   * Uses the sofa_events table to identify currently live match IDs.
-   */
-  @Cron("*/30 * * * * *")
-  async cronLiveMatchDetails(): Promise<void> {
+  private get scheduledCronEnabled(): boolean {
+    return (
+      this.configService.get<boolean>("ingestion.enableScheduledCron") ?? false
+    );
+  }
+
+  async onApplicationBootstrap(): Promise<void> {
+    const shouldBootstrap =
+      this.configService.get<boolean>("ingestion.runBootstrapOnStartup") ??
+      false;
+
+    if (!shouldBootstrap) return;
+    if (this.bootstrapStarted) return;
+    this.bootstrapStarted = true;
+
+    // Let HTTP startup finish first so the app becomes reachable immediately.
+    setTimeout(() => {
+      void this.runBootstrapSequence();
+    }, 0);
+  }
+
+  private async runBootstrapSequence(): Promise<void> {
+    this.logger.log("Bootstrap mode detected - starting cold start sequence");
+
     try {
-      await this.ingestionService.refreshLiveMatchDetails();
+      this.logger.log("Bootstrap step 1/3: weekly teams");
+      await this.ingestionService.ingestFocusedWeeklyTeams();
+
+      this.logger.log("Bootstrap step 2/3: matchday players");
+      await this.ingestionService.ingestFocusedMatchdayPlayers();
+
+      this.logger.log("Bootstrap step 3/3: bootstrap events (+/-7 days)");
+      await this.ingestionService.ingestFocusedBootstrapEvents();
+
+      this.logger.log("Bootstrap complete - normal schedule active");
     } catch (err) {
-      this.logger.error(
-        "[CRON] live-match-details failed",
-        (err as Error).stack,
-      );
+      this.logger.error("Bootstrap failed", (err as Error).stack);
     }
   }
 
-  /**
-   * Every 1 minute — refresh live tournament list and live event list.
-   * sport/{sport}/live-tournaments  +  sport/{sport}/events/live
-   */
-  @Cron(CronExpression.EVERY_MINUTE)
-  async cronLiveTournaments(): Promise<void> {
+  @Cron("0 * * * * *", { timeZone: LOCAL_CRON_TIMEZONE })
+  async cronLiveIndexes(): Promise<void> {
+    if (!this.scheduledCronEnabled) return;
+    if (!this.liveCronEnabled) return;
     try {
       await this.ingestionService.refreshLiveTournaments();
     } catch (err) {
-      this.logger.error("[CRON] live-tournaments failed", (err as Error).stack);
+      this.logger.error("[CRON] live-indexes failed", (err as Error).stack);
     }
   }
 
-  // ─── Scheduled / Upcoming ────────────────────────────────────────────────
-
-  /**
-   * Every 5 minutes — today's scheduled events for all priority tournaments.
-   * unique-tournament/{id}/scheduled-events/{today}
-   */
-  @Cron(CronExpression.EVERY_5_MINUTES)
-  async cronScheduledEventsToday(): Promise<void> {
-    this.logger.log("[CRON] scheduled-events-today");
+  @Cron("*/30 * * * * *", { timeZone: LOCAL_CRON_TIMEZONE })
+  async cronImportantLiveMatchDetails(): Promise<void> {
+    if (!this.scheduledCronEnabled) return;
+    if (!this.liveCronEnabled) return;
     try {
-      await this.ingestionService.ingestScheduledEventsForDate(new Date());
+      await this.ingestionService.refreshImportantLiveMatchDetails();
+    } catch (err) {
+      this.logger.error("[CRON] live-important failed", (err as Error).stack);
+    }
+  }
+
+  @Cron("0 */2 * * * *", { timeZone: LOCAL_CRON_TIMEZONE })
+  async cronNormalLiveMatchDetails(): Promise<void> {
+    if (!this.scheduledCronEnabled) return;
+    if (!this.liveCronEnabled) return;
+    try {
+      await this.ingestionService.refreshNormalLiveMatchDetails();
+    } catch (err) {
+      this.logger.error("[CRON] live-normal failed", (err as Error).stack);
+    }
+  }
+
+  @Cron("0 */5 * * * *", { timeZone: LOCAL_CRON_TIMEZONE })
+  async cronMatchStartDetector(): Promise<void> {
+    if (!this.scheduledCronEnabled) return;
+    if (!this.liveCronEnabled) return;
+    try {
+      await this.ingestionService.detectStartedMatches();
     } catch (err) {
       this.logger.error(
-        "[CRON] scheduled-events-today failed",
+        "[CRON] match-start-detector failed",
         (err as Error).stack,
       );
     }
   }
 
-  /**
-   * Every 10 minutes — sport-level scheduled-tournaments for today.
-   * sport/{sport}/scheduled-tournaments/{date}
-   * Powers the home page date-picker / tournament listing.
-   */
-  @Cron(CronExpression.EVERY_10_MINUTES)
-  async cronSportScheduledTournaments(): Promise<void> {
+  @Cron("0 */10 * * * *", { timeZone: LOCAL_CRON_TIMEZONE })
+  async cronUpcomingLineups(): Promise<void> {
+    if (!this.scheduledCronEnabled) return;
+    if (!this.liveCronEnabled) return;
     try {
-      await this.ingestionService.ingestSportScheduledTournaments(new Date());
+      await this.ingestionService.refreshUpcomingLineups();
+    } catch (err) {
+      this.logger.error("[CRON] lineups-upcoming failed", (err as Error).stack);
+    }
+  }
+
+  @Cron("30 */10 * * * *", { timeZone: LOCAL_CRON_TIMEZONE })
+  async cronRecentlyFinishedCorrections(): Promise<void> {
+    if (!this.scheduledCronEnabled) return;
+    if (!this.liveCronEnabled) return;
+    try {
+      await this.ingestionService.refreshRecentlyFinishedMatches();
     } catch (err) {
       this.logger.error(
-        "[CRON] sport-scheduled-tournaments failed",
+        "[CRON] finished-correction failed",
         (err as Error).stack,
       );
     }
   }
 
-  /**
-   * Every 30 minutes — tomorrow's scheduled events.
-   * Keeps upcoming match data warm before match day starts.
-   */
-  @Cron(CronExpression.EVERY_30_MINUTES)
-  async cronScheduledEventsTomorrow(): Promise<void> {
-    const tomorrow = new Date();
-    tomorrow.setDate(tomorrow.getDate() + 1);
+  @Cron("0 */15 * * * *", { timeZone: LOCAL_CRON_TIMEZONE })
+  async cronRecentlyFinishedStandings(): Promise<void> {
+    if (!this.scheduledCronEnabled) return;
+    if (!this.liveCronEnabled) return;
     try {
-      await this.ingestionService.ingestScheduledEventsForDate(tomorrow);
+      await this.ingestionService.refreshRecentlyFinishedStandings();
     } catch (err) {
       this.logger.error(
-        "[CRON] scheduled-events-tomorrow failed",
+        "[CRON] standings-recent-finished failed",
         (err as Error).stack,
       );
     }
   }
 
-  // ─── Daily jobs ──────────────────────────────────────────────────────────
-
-  /**
-   * Daily 01:30 UTC — newly-added-events + global config/reference data.
-   * country/alpha2, config/default-unique-tournaments, odds/providers, etc.
-   */
-  @Cron("0 30 1 * * *")
-  async cronGlobalConfig(): Promise<void> {
-    this.logger.log("[CRON] global-config");
+  @Cron("0 0 20 * * *", { timeZone: LOCAL_CRON_TIMEZONE })
+  async runFocusedDailyEvents(): Promise<void> {
+    if (!this.scheduledCronEnabled) return;
     try {
-      await this.ingestionService.ingestGlobalConfig();
+      await this.ingestionService.ingestFocusedDailyEvents();
     } catch (err) {
-      this.logger.error("[CRON] global-config failed", (err as Error).stack);
+      this.logger.error(
+        "[CRON] focused-daily-events failed",
+        (err as Error).stack,
+      );
     }
   }
 
-  /**
-   * Daily 02:00 UTC — delete expired snapshots.
-   * Immutable historical events (expires_at IS NULL) are never deleted.
-   */
-  @Cron("0 0 2 * * *")
-  async cronCleanup(): Promise<void> {
-    this.logger.log("[CRON] cleanup-expired-snapshots");
+  @Cron("0 0 20 * * 1", { timeZone: LOCAL_CRON_TIMEZONE })
+  async runFocusedWeeklyTeams(): Promise<void> {
+    if (!this.scheduledCronEnabled) return;
     try {
-      const deleted = await this.snapshotService.deleteExpired();
-      this.logger.log(`[CRON] cleanup deleted ${deleted} expired snapshots`);
+      await this.ingestionService.ingestFocusedWeeklyTeams();
     } catch (err) {
-      this.logger.error("[CRON] cleanup failed", (err as Error).stack);
+      this.logger.error(
+        "[CRON] focused-weekly-teams failed",
+        (err as Error).stack,
+      );
     }
   }
 
-  /**
-   * Daily 03:00 UTC — historical backfill for scheduled events.
-   * Fills gaps for N days back (default 365) for all priority tournaments.
-   */
-  @Cron("0 0 3 * * *")
+  @Cron("0 0 23 * * 1", { timeZone: LOCAL_CRON_TIMEZONE })
+  async runFocusedMondayPlayers(): Promise<void> {
+    if (!this.scheduledCronEnabled) return;
+    try {
+      await this.ingestionService.ingestFocusedMatchdayPlayers();
+    } catch (err) {
+      this.logger.error(
+        "[CRON] focused-monday-players failed",
+        (err as Error).stack,
+      );
+    }
+  }
+
+  @Cron("0 0 20 * * 3,5", { timeZone: LOCAL_CRON_TIMEZONE })
+  async runFocusedMatchdayPlayers(): Promise<void> {
+    if (!this.scheduledCronEnabled) return;
+    try {
+      await this.ingestionService.ingestFocusedMatchdayPlayers();
+    } catch (err) {
+      this.logger.error(
+        "[CRON] focused-matchday-players failed",
+        (err as Error).stack,
+      );
+    }
+  }
+
   async cronHistoricalBackfill(): Promise<void> {
     this.logger.log("[CRON] historical-backfill");
     try {
@@ -165,12 +209,6 @@ export class IngestionCron {
     }
   }
 
-  /**
-   * Daily 03:30 UTC — backfill match-detail bundle for recently finished events.
-   * Fetches incidents, statistics, h2h, highlights for matches we have
-   * in sofa_events but haven't yet ingested sub-endpoint data for.
-   */
-  @Cron("0 30 3 * * *")
   async cronBackfillMatchDetails(): Promise<void> {
     this.logger.log("[CRON] backfill-match-details");
     try {
@@ -183,12 +221,6 @@ export class IngestionCron {
     }
   }
 
-  /**
-   * Daily 04:00 UTC — tournament metadata bundle.
-   * unique-tournament/{id}, /seasons, /standings/total, /cuptrees,
-   * top-players, sport categories.
-   */
-  @Cron("0 0 4 * * *")
   async cronMetadata(): Promise<void> {
     this.logger.log("[CRON] metadata-tournaments");
     try {
@@ -201,30 +233,33 @@ export class IngestionCron {
     }
   }
 
-  /**
-   * Daily 06:30 UTC — pre-warm player statistics for all active sports.
-   *
-   * Discovers player IDs from cached team roster snapshots (team/{id}/players),
-   * then fetches for every active sport:
-   *   player/{id}/statistics          — career aggregate stats
-   *   player/{id}/statistics/seasons  — list of seasons with data
-   *
-   * After this cron runs, `player/{playerId}/statistics` requests will be
-   * served from the local DB (source: "local-db") instead of hitting the
-   * external provider on every request.
-   *
-   * Runs AFTER metadata cron (04:00) so team roster snapshots are fresh.
-   */
-  @Cron("0 30 6 * * *")
+  async cronTeamProfiles(): Promise<void> {
+    this.logger.log("[CRON] team-profiles");
+    try {
+      await this.ingestionService.ingestTeamProfiles();
+    } catch (err) {
+      this.logger.error("[CRON] team-profiles failed", (err as Error).stack);
+    }
+  }
+
   async cronPlayerStatistics(): Promise<void> {
     this.logger.log("[CRON] player-statistics");
     try {
-      await this.ingestionService.ingestPlayerStatistics();
+      await this.ingestionService.ingestPlayerProfiles();
     } catch (err) {
       this.logger.error(
         "[CRON] player-statistics failed",
         (err as Error).stack,
       );
+    }
+  }
+
+  async cronCatalogCoverage(): Promise<void> {
+    this.logger.log("[CRON] catalog-coverage");
+    try {
+      await this.ingestionService.ingestCatalogCoverage();
+    } catch (err) {
+      this.logger.error("[CRON] catalog-coverage failed", (err as Error).stack);
     }
   }
 }

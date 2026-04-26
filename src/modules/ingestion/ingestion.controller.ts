@@ -25,6 +25,7 @@ import {
   BackfillMatchDetailsBodyDto,
   BackfillScheduledEventsBodyDto,
   EventBundleTriggerResponseDto,
+  IngestionJobsQueryDto,
   IngestionJobStatsResponseDto,
   IngestionJobsListResponseDto,
   MessageResponseDto,
@@ -211,12 +212,20 @@ export class IngestionController {
     example: 50,
     description: "Max rows (default 50)",
   })
+  @ApiQuery({
+    name: "jobType",
+    required: false,
+    type: "string",
+    example: "scheduled-events",
+    description: "Filter jobs by exact job type",
+  })
   @ApiOkResponse({ type: IngestionJobsListResponseDto })
   async getJobs(
-    @Query("limit") limit?: string,
+    @Query() query: IngestionJobsQueryDto,
   ): Promise<IngestionJobsListResponseDto> {
     const jobs = await this.jobTracker.getRecentJobs(
-      limit ? parseInt(limit, 10) : 50,
+      query.limit ?? 50,
+      query.jobType?.trim() || undefined,
     );
     return { jobs };
   }
@@ -228,6 +237,21 @@ export class IngestionController {
   @ApiOkResponse({ type: IngestionJobStatsResponseDto })
   async getJobStats(): Promise<IngestionJobStatsResponseDto> {
     return this.jobTracker.getJobStats();
+  }
+
+  @Post("jobs/mark-running-stale")
+  @ApiOperation({
+    summary: "Mark currently RUNNING ingestion jobs as failed/stale",
+    description:
+      "Ops helper for a fresh analysis run after a server restart or interrupted cron. " +
+      "It does not stop in-process work; use it only when those RUNNING rows are known stale.",
+  })
+  @ApiOkResponse({ type: MessageResponseDto })
+  async markRunningJobsStale(): Promise<MessageResponseDto> {
+    const count = await this.jobTracker.markRunningJobsStale(
+      "Manually marked stale via POST /internal/ingestion/jobs/mark-running-stale.",
+    );
+    return { message: `Marked ${count} RUNNING job(s) as stale.` };
   }
 
   @Get("api-coverage")

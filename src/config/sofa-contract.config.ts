@@ -14,11 +14,9 @@ export const sofaContractConfig = registerAs("sofaContract", () => ({
   /**
    * All sports the ingestion engine actively pre-warms.
    * Set SOFA_ACTIVE_SPORTS as comma-separated slugs (e.g. football,basketball,cricket,tennis).
-   * Falls back to all four when the env var is unset.
+   * Falls back to football when the env var is unset to protect provider budget.
    */
-  activeSports: (
-    process.env.SOFA_ACTIVE_SPORTS ?? "football,basketball,cricket,tennis"
-  )
+  activeSports: (process.env.SOFA_ACTIVE_SPORTS ?? "football")
     .split(",")
     .map((s) => s.trim().toLowerCase())
     .filter(Boolean),

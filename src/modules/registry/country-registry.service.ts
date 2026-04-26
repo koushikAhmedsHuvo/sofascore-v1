@@ -1,4 +1,5 @@
 import { Injectable, Logger, OnApplicationBootstrap } from "@nestjs/common";
+import { ConfigService } from "@nestjs/config";
 import { InjectRepository } from "@nestjs/typeorm";
 import { QueryFailedError, Repository } from "typeorm";
 import { SofaCountryEntity } from "../../shared/entities/sofa-country.entity";
@@ -35,10 +36,22 @@ export class CountryRegistryService implements OnApplicationBootstrap {
     private readonly countryRepo: Repository<SofaCountryEntity>,
     private readonly contract: SofaContractService,
     private readonly providerClient: ProviderClientService,
+    private readonly configService: ConfigService,
   ) {}
 
   async onApplicationBootstrap(): Promise<void> {
     await this.loadFromDb();
+
+    const shouldRefresh =
+      this.configService.get<boolean>(
+        "ingestion.enableRegistryBootstrapRefresh",
+      ) ?? false;
+    if (!shouldRefresh) {
+      this.logger.log(
+        "[CountryRegistry] Bootstrap provider refresh disabled; using DB/env state.",
+      );
+      return;
+    }
 
     this.discoverAndRefresh().catch((err) =>
       this.logger.warn(

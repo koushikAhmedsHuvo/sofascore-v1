@@ -201,6 +201,15 @@ export class SofaContractService {
     return `sport/${sport}/scheduled-events/${dateYyyyMmDd}`;
   }
 
+  /** `sport/football/scheduled-events/2026-04-04/page/0` */
+  sportScheduledEventsPaged(
+    dateYyyyMmDd: string,
+    page: number,
+    sport = this.getDefaultSport(),
+  ): string {
+    return `sport/${sport}/scheduled-events/${dateYyyyMmDd}/page/${page}`;
+  }
+
   /**
    * `sport/football/event-count` or `sport/21600/event-count`
    * Home page fires numeric ID (21600 = football). Slug works too.
@@ -247,6 +256,11 @@ export class SofaContractService {
   /** `unique-tournament/7/season/61627/standings/total` */
   standingsTotal(tournamentId: number, seasonId: number): string {
     return `unique-tournament/${tournamentId}/season/${seasonId}/standings/total`;
+  }
+
+  /** `unique-tournament/7/season/61627/standings` */
+  standings(tournamentId: number, seasonId: number): string {
+    return `unique-tournament/${tournamentId}/season/${seasonId}/standings`;
   }
 
   /** `unique-tournament/7/season/61627/standings/home` */
@@ -746,6 +760,11 @@ export class SofaContractService {
     return `team/${teamId}/recent-unique-tournaments`;
   }
 
+  /** `team/95935/unique-tournaments` */
+  teamUniqueTournaments(teamId: number): string {
+    return `team/${teamId}/unique-tournaments`;
+  }
+
   /** `team/95935/performance` */
   teamPerformance(teamId: number): string {
     return `team/${teamId}/performance`;
@@ -979,6 +998,27 @@ export class SofaContractService {
     return [
       this.playerStatisticsOverview(playerId),
       this.playerStatisticsSeasons(playerId),
+    ];
+  }
+
+  /**
+   * Expanded player profile bundle for nightly pre-warming.
+   * Covers the core profile/stat surfaces while leaving long-tail endpoints
+   * such as videos or per-tournament-season slices for on-demand caching.
+   */
+  playerProfileBundlePaths(playerId: number): string[] {
+    return [
+      this.playerDetail(playerId),
+      this.playerPerformance(playerId),
+      this.playerStatisticsOverview(playerId),
+      this.playerStatisticsSeasons(playerId),
+      this.playerLastYearSummary(playerId),
+      this.playerUniqueTournaments(playerId),
+      this.playerTransferHistory(playerId),
+      this.playerNationalTeamStatistics(playerId),
+      this.playerAttributeOverviews(playerId),
+      this.playerEventsLast(playerId),
+      this.playerMedia(playerId),
     ];
   }
 
@@ -1303,6 +1343,46 @@ export class SofaContractService {
       this.teamNearEvents(teamId),
       this.teamEventsNext(teamId),
       this.teamEventsLast(teamId),
+    ];
+  }
+
+  /**
+   * Expanded team profile bundle for proactive nightly pre-warming.
+   * Keeps the most commonly used team profile pages warm in `raw_snapshots`.
+   */
+  teamProfileBundlePaths(teamId: number): string[] {
+    return [
+      ...this.teamBundlePaths(teamId),
+      this.teamTransfers(teamId),
+      this.teamMedia(teamId),
+      this.teamUniqueTournamentsAll(teamId),
+      this.teamAchievements(teamId),
+      this.teamStandingsSeasons(teamId),
+    ];
+  }
+
+  /**
+   * Match bundle used for proactive pre-warming of upcoming / recent events.
+   * Slightly lighter than the full historical backfill bundle.
+   */
+  upcomingEventBundlePaths(eventId: number): string[] {
+    return [
+      this.eventDetail(eventId),
+      this.eventIncidents(eventId),
+      this.eventStatistics(eventId),
+      this.eventLineups(eventId),
+      this.eventH2h(eventId),
+      this.eventH2hEvents(eventId),
+      this.eventManagers(eventId),
+      this.eventHighlights(eventId),
+      this.eventBestPlayersSummary(eventId),
+      this.eventMeta(eventId),
+      this.eventGraph(eventId),
+      this.eventPointsOverview(eventId),
+      this.tvEventCountryChannels(eventId),
+      this.eventOddsFeatured(eventId),
+      this.eventOddsAll(eventId),
+      this.eventWinningOdds(eventId),
     ];
   }
 
