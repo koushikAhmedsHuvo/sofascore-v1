@@ -2684,6 +2684,27 @@ export class IngestionService {
     return dates;
   }
 
+  async refreshRegistries(): Promise<void> {
+    await this.countryRegistry.discoverAndRefresh();
+    await this.registry.discoverAndRefresh(this.activeSports);
+  }
+
+  async runFullFootballBootstrap(): Promise<void> {
+    await this.refreshRegistries();
+    await this.ingestTournamentMetadata();
+    await this.ingestGlobalConfig();
+    await this.ingestScheduledEventsForDate(new Date());
+    await this.ingestScheduledEventsForDate(
+      new Date(Date.now() + 24 * 60 * 60 * 1000),
+    );
+    await this.refreshLiveTournaments();
+    await this.refreshRecentlyFinishedMatches();
+    await this.refreshRecentlyFinishedStandings();
+    await this.ingestTeamProfiles();
+    await this.ingestPlayerProfiles();
+    await this.ingestRecentAndUpcomingEventBundles();
+  }
+
   private collectUniqueTournamentIds(payload: Record<string, unknown>): number[] {
     const rawEvents = Array.isArray(payload.events) ? payload.events : [];
     const ids = new Set<number>();

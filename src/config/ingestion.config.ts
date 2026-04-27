@@ -9,6 +9,10 @@ import { registerAs } from '@nestjs/config';
  * refresh. There is nothing to seed in env files.
  */
 export const ingestionConfig = registerAs('ingestion', () => ({
+  /** Enable the broader tiered football ingestion plan. */
+  enableFullFootballPlan:
+    process.env.INGESTION_ENABLE_FULL_FOOTBALL_PLAN === 'true',
+
   /** Enable high-frequency live / near-live cron jobs. */
   enableLiveCron: process.env.INGESTION_ENABLE_LIVE_CRON === 'true',
 
@@ -18,6 +22,10 @@ export const ingestionConfig = registerAs('ingestion', () => ({
   /** Run the focused ingestion flow automatically on application startup. */
   runFocusedFlowOnStartup:
     process.env.INGESTION_RUN_FOCUSED_FLOW_ON_STARTUP !== 'false',
+
+  /** Keep legacy focused cron jobs active alongside the full-football plan. */
+  enableFocusedCompatibilityJobs:
+    process.env.INGESTION_ENABLE_FOCUSED_COMPATIBILITY_JOBS === 'true',
 
   /** Run the focused bootstrap sequence once on module startup. */
   runBootstrapOnStartup:
@@ -84,6 +92,15 @@ export const ingestionConfig = registerAs('ingestion', () => ({
 
   /** How many calendar days back the historical backfill job should reach. */
   backfillDaysBack: parseInt(process.env.BACKFILL_DAYS_BACK ?? '365', 10),
+
+  /**
+   * Lightweight nightly backfill window for the tiered all-football plan.
+   * Keeps recent history warm without replaying the full archive every day.
+   */
+  nightlyBackfillDays: parseInt(
+    process.env.INGESTION_NIGHTLY_BACKFILL_DAYS ?? '3',
+    10,
+  ),
 
   /**
    * TTL per endpoint volatility class (seconds). **`0` = `expires_at` NULL**

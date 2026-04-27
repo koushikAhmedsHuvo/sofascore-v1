@@ -19,9 +19,30 @@ export class IngestionCron implements OnApplicationBootstrap {
     return this.configService.get<boolean>("ingestion.enableLiveCron") ?? false;
   }
 
+  private get fullFootballPlanEnabled(): boolean {
+    return (
+      this.configService.get<boolean>("ingestion.enableFullFootballPlan") ??
+      false
+    );
+  }
+
+  private get focusedCompatibilityJobsEnabled(): boolean {
+    return (
+      this.configService.get<boolean>(
+        "ingestion.enableFocusedCompatibilityJobs",
+      ) ?? false
+    );
+  }
+
   private get scheduledCronEnabled(): boolean {
     return (
       this.configService.get<boolean>("ingestion.enableScheduledCron") ?? false
+    );
+  }
+
+  private get nightlyBackfillDays(): number {
+    return (
+      this.configService.get<number>("ingestion.nightlyBackfillDays") ?? 3
     );
   }
 
@@ -41,6 +62,20 @@ export class IngestionCron implements OnApplicationBootstrap {
   }
 
   private async runBootstrapSequence(): Promise<void> {
+    if (this.fullFootballPlanEnabled) {
+      this.logger.log(
+        "Bootstrap mode detected - starting full-football cold start sequence",
+      );
+
+      try {
+        await this.ingestionService.runFullFootballBootstrap();
+        this.logger.log("Full-football bootstrap complete - normal schedule active");
+      } catch (err) {
+        this.logger.error("Full-football bootstrap failed", (err as Error).stack);
+      }
+      return;
+    }
+
     this.logger.log("Bootstrap mode detected - starting cold start sequence");
 
     try {
@@ -148,6 +183,9 @@ export class IngestionCron implements OnApplicationBootstrap {
   @Cron("0 0 20 * * *", { timeZone: LOCAL_CRON_TIMEZONE })
   async runFocusedDailyEvents(): Promise<void> {
     if (!this.scheduledCronEnabled) return;
+    if (this.fullFootballPlanEnabled && !this.focusedCompatibilityJobsEnabled) {
+      return;
+    }
     try {
       await this.ingestionService.ingestFocusedDailyEvents();
     } catch (err) {
@@ -161,6 +199,9 @@ export class IngestionCron implements OnApplicationBootstrap {
   @Cron("0 0 20 * * 1", { timeZone: LOCAL_CRON_TIMEZONE })
   async runFocusedWeeklyTeams(): Promise<void> {
     if (!this.scheduledCronEnabled) return;
+    if (this.fullFootballPlanEnabled && !this.focusedCompatibilityJobsEnabled) {
+      return;
+    }
     try {
       await this.ingestionService.ingestFocusedWeeklyTeams();
     } catch (err) {
@@ -174,6 +215,9 @@ export class IngestionCron implements OnApplicationBootstrap {
   @Cron("0 0 23 * * 1", { timeZone: LOCAL_CRON_TIMEZONE })
   async runFocusedMondayPlayers(): Promise<void> {
     if (!this.scheduledCronEnabled) return;
+    if (this.fullFootballPlanEnabled && !this.focusedCompatibilityJobsEnabled) {
+      return;
+    }
     try {
       await this.ingestionService.ingestFocusedMatchdayPlayers();
     } catch (err) {
@@ -187,11 +231,128 @@ export class IngestionCron implements OnApplicationBootstrap {
   @Cron("0 0 20 * * 3,5", { timeZone: LOCAL_CRON_TIMEZONE })
   async runFocusedMatchdayPlayers(): Promise<void> {
     if (!this.scheduledCronEnabled) return;
+    if (this.fullFootballPlanEnabled && !this.focusedCompatibilityJobsEnabled) {
+      return;
+    }
     try {
       await this.ingestionService.ingestFocusedMatchdayPlayers();
     } catch (err) {
       this.logger.error(
         "[CRON] focused-matchday-players failed",
+        (err as Error).stack,
+      );
+    }
+  }
+
+  @Cron("0 */30 * * * *", { timeZone: LOCAL_CRON_TIMEZONE })
+  async runTier1ScheduledToday(): Promise<void> {
+    if (!this.scheduledCronEnabled) return;
+    if (!this.fullFootballPlanEnabled) return;
+    try {
+      await this.ingestionService.ingestScheduledEventsForDate(new Date());
+    } catch (err) {
+      this.logger.error(
+        "[CRON] tier1-scheduled-today failed",
+        (err as Error).stack,
+      );
+    }
+  }
+
+  @Cron("0 0 */2 * * *", { timeZone: LOCAL_CRON_TIMEZONE })
+  async runTier1ScheduledTomorrow(): Promise<void> {
+    if (!this.scheduledCronEnabled) return;
+    if (!this.fullFootballPlanEnabled) return;
+    try {
+      await this.ingestionService.ingestScheduledEventsForDate(
+        new Date(Date.now() + 24 * 60 * 60 * 1000),
+      );
+    } catch (err) {
+      this.logger.error(
+        "[CRON] tier1-scheduled-tomorrow failed",
+        (err as Error).stack,
+      );
+    }
+  }
+
+  @Cron("0 0 1 * * *", { timeZone: LOCAL_CRON_TIMEZONE })
+  async runTier1RegistryRefresh(): Promise<void> {
+    if (!this.scheduledCronEnabled) return;
+    if (!this.fullFootballPlanEnabled) return;
+    try {
+      await this.ingestionService.refreshRegistries();
+    } catch (err) {
+      this.logger.error(
+        "[CRON] tier1-registry-refresh failed",
+        (err as Error).stack,
+      );
+    }
+  }
+
+  @Cron("0 0 2 * * *", { timeZone: LOCAL_CRON_TIMEZONE })
+  async runTier1Metadata(): Promise<void> {
+    if (!this.scheduledCronEnabled) return;
+    if (!this.fullFootballPlanEnabled) return;
+    try {
+      await this.ingestionService.ingestTournamentMetadata();
+      await this.ingestionService.ingestGlobalConfig();
+    } catch (err) {
+      this.logger.error("[CRON] tier1-metadata failed", (err as Error).stack);
+    }
+  }
+
+  @Cron("0 0 * * * *", { timeZone: LOCAL_CRON_TIMEZONE })
+  async runTier3UpcomingBundles(): Promise<void> {
+    if (!this.scheduledCronEnabled) return;
+    if (!this.fullFootballPlanEnabled) return;
+    try {
+      await this.ingestionService.ingestRecentAndUpcomingEventBundles();
+    } catch (err) {
+      this.logger.error(
+        "[CRON] tier3-event-bundles failed",
+        (err as Error).stack,
+      );
+    }
+  }
+
+  @Cron("0 0 3 * * *", { timeZone: LOCAL_CRON_TIMEZONE })
+  async runTier2TeamProfiles(): Promise<void> {
+    if (!this.scheduledCronEnabled) return;
+    if (!this.fullFootballPlanEnabled) return;
+    try {
+      await this.ingestionService.ingestTeamProfiles();
+    } catch (err) {
+      this.logger.error(
+        "[CRON] tier2-team-profiles failed",
+        (err as Error).stack,
+      );
+    }
+  }
+
+  @Cron("0 0 4 * * *", { timeZone: LOCAL_CRON_TIMEZONE })
+  async runTier2PlayerProfiles(): Promise<void> {
+    if (!this.scheduledCronEnabled) return;
+    if (!this.fullFootballPlanEnabled) return;
+    try {
+      await this.ingestionService.ingestPlayerProfiles();
+    } catch (err) {
+      this.logger.error(
+        "[CRON] tier2-player-profiles failed",
+        (err as Error).stack,
+      );
+    }
+  }
+
+  @Cron("0 0 5 * * *", { timeZone: LOCAL_CRON_TIMEZONE })
+  async runTier3NightlyBackfill(): Promise<void> {
+    if (!this.scheduledCronEnabled) return;
+    if (!this.fullFootballPlanEnabled) return;
+    try {
+      await this.ingestionService.backfillHistoricalEvents(
+        this.nightlyBackfillDays,
+      );
+    } catch (err) {
+      this.logger.error(
+        "[CRON] tier3-nightly-backfill failed",
         (err as Error).stack,
       );
     }
