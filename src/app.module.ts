@@ -34,8 +34,10 @@ import { IngestionModule } from './modules/ingestion/ingestion.module';
 import { NormalizeModule } from './modules/normalize/normalize.module';
 import { HealthModule } from './modules/health/health.module';
 import { MetricsModule } from './modules/metrics/metrics.module';
+import { RootController } from './root.controller';
 
 @Module({
+  controllers: [RootController],
   imports: [
     // ─── Config ───────────────────────────────────────────────────────────
     ConfigModule.forRoot({
