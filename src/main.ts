@@ -52,6 +52,7 @@ async function bootstrap(): Promise<void> {
     exclude: [
       { path: '/', method: RequestMethod.GET },
       { path: '/healthcheck', method: RequestMethod.GET },
+      { path: '/provider-debug', method: RequestMethod.GET },
     ],
   });
 
