@@ -35,6 +35,11 @@ PROVIDER_AUTH_HEADER_NAME=x-api-key
 CORS_ORIGINS=https://your-frontend-domain.com
 ```
 
+Important:
+
+- Do not use local-only placeholder values such as `local-dev-2026` on Render.
+- If your provider access is IP/domain-based and does not require a per-request key, leave `PROVIDER_API_KEY` empty.
+
 Recommended additional envs:
 
 ```env
