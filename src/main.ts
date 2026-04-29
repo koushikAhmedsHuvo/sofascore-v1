@@ -49,7 +49,10 @@ async function bootstrap(): Promise<void> {
 
   const apiPrefix = process.env.API_PREFIX ?? 'api/v1';
   app.setGlobalPrefix(apiPrefix, {
-    exclude: [{ path: '/', method: RequestMethod.GET }],
+    exclude: [
+      { path: '/', method: RequestMethod.GET },
+      { path: '/healthcheck', method: RequestMethod.GET },
+    ],
   });
 
   app.useGlobalPipes(

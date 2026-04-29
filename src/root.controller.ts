@@ -15,4 +15,9 @@ export class RootController {
       },
     };
   }
+
+  @Get('healthcheck')
+  healthcheck() {
+    return 'ok';
+  }
 }
