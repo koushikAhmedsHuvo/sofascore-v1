@@ -1,20 +1,5 @@
 import { registerAs } from "@nestjs/config";
 
-function sanitizeProviderApiKey(raw: string): string {
-  const value = raw.trim();
-  if (!value) return "";
-
-  const isProduction = process.env.NODE_ENV === "production";
-  const looksLikeLocalDevToken = /^local-dev-/i.test(value);
-
-  // Prevent obvious local-only placeholder tokens from being sent in production.
-  if (isProduction && looksLikeLocalDevToken) {
-    return "";
-  }
-
-  return value;
-}
-
 /**
  * Outbound HTTP client for the SofaScore-compatible data provider.
  *
@@ -38,7 +23,7 @@ export const providerConfig = registerAs("provider", () => ({
    * subscription-based at the IP/domain level (e.g., sportsdata365).
    * Set only when your provider explicitly requires a per-request key.
    */
-  apiKey: sanitizeProviderApiKey(process.env.PROVIDER_API_KEY ?? ""),
+  apiKey: (process.env.PROVIDER_API_KEY ?? "").trim(),
 
   /**
    * Header name to use when apiKey is non-empty.
